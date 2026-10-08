@@ -3,29 +3,21 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Jawalat · Scout Tracker</title>
-  <meta name="theme-color" content="#470217">
-  <link rel="icon" type="image/png" href="/favicon.png">
-  <link rel="apple-touch-icon" href="/icon-192.png">
-  <link rel="manifest" href="/manifest.webmanifest">
+  <title>Jawlat</title>
+  <link rel="icon" href="/favicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <header>
-    <a class="brand" href="/">
-      <img src="/logo.png" alt="جولات" width="90" height="48">
-      <div class="titles"><h1 data-i18n="title">Scout Tracker</h1><p data-i18n="subtitle"></p></div>
-    </a>
+    <div class="grow"><h1><a href="/" style="border:0;padding:0"><img src="/logo.jpg" alt="جولات"></a></h1><p data-i18n="subtitle"></p></div>
     <nav>
-      <a class="pill" href="/leader.html" data-i18n="leader_area">Admin</a>
-      <button id="langBtn" type="button"></button>
+      <a href="/leader.html" data-i18n="leader_area">Leader area</a>
+      <button id="langBtn" type="button" class="lang" data-i18n="lang_toggle">العربية</button>
     </nav>
   </header>
-  <div class="stats" id="stats" hidden></div>
-  <main>
+  <main class="cols">
     <section>
       <input id="search" type="search" data-i18n-ph="search" aria-label="Search">
       <ul id="list" class="scout-list"></ul>
@@ -37,39 +29,28 @@
     const listEl = document.getElementById('list'), detailEl = document.getElementById('detail'), search = document.getElementById('search');
     let scouts = [], current = null, data = null;
 
-    function drawStats() {
-      const box = document.getElementById('stats');
-      box.hidden = !scouts.length;
-      box.replaceChildren(
-        el('div', { class: 'stat' }, el('span', {}, t('stat_scouts')), el('b', {}, fmt(scouts.length))),
-        el('div', { class: 'stat' }, el('span', {}, t('stat_xp')), el('b', {}, fmt(scouts.reduce((n, s) => n + s.total_xp, 0)))),
-        el('div', { class: 'stat' }, el('span', {}, t('stat_top')), el('b', {}, scouts[0] ? scouts[0].name : '—')));
-    }
     function drawList() {
       const q = search.value.trim().toLowerCase();
-      renderScoutList(listEl, scouts.filter((s) => s.name.toLowerCase().includes(q)), current, (id) => openScout(id, true));
+      renderScoutList(listEl, scouts.filter((s) => s.name.toLowerCase().includes(q)), current, openScout);
     }
     function drawDetail() {
       detailEl.replaceChildren();
       if (!data) return detailEl.append(el('p', { class: 'empty' }, t('select_scout')));
       detailEl.append(renderDetailHead(data), renderLog(data));
     }
-    async function openScout(id, scroll) {
+    async function openScout(id) {
       current = id;
       history.replaceState(null, '', '#' + id);
       drawList();
       try { data = await api('/api/scouts/' + id); } catch { data = null; }
       drawDetail();
-      // on phones the card sits below the list, so bring it into view
-      if (scroll && matchMedia('(max-width: 760px)').matches) detailEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
     search.addEventListener('input', drawList);
-    document.addEventListener('langchange', () => { drawStats(); drawList(); drawDetail(); });
+    document.addEventListener('langchange', () => { drawList(); drawDetail(); });
 
     (async () => {
       await initLang();
-      scouts = rankScouts(await api('/api/scouts'));
-      drawStats();
+      scouts = await api('/api/scouts');
       drawList();
       const id = parseInt(location.hash.slice(1), 10);
       if (id) openScout(id); else drawDetail();

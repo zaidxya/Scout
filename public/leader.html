@@ -3,31 +3,23 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Jawalat · Scout Tracker</title>
-  <meta name="theme-color" content="#470217">
-  <link rel="icon" type="image/png" href="/favicon.png">
-  <link rel="apple-touch-icon" href="/icon-192.png">
-  <link rel="manifest" href="/manifest.webmanifest">
+  <title>Jawlat</title>
+  <link rel="icon" href="/favicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <header>
-    <a class="brand" href="/">
-      <img src="/logo.png" alt="جولات" width="90" height="48">
-      <div class="titles"><h1 data-i18n="title">Scout Tracker</h1><p data-i18n="leader_area"></p></div>
-    </a>
+    <div class="grow"><h1><a href="/" style="border:0;padding:0"><img src="/logo.jpg" alt="جولات"></a></h1><p data-i18n="leader_area"></p></div>
     <nav>
-      <a class="pill" href="/" data-i18n="home">Dashboard</a>
+      <a href="/" data-i18n="home">Dashboard</a>
       <button id="logoutBtn" type="button" class="hidden" data-i18n="logout"></button>
-      <button id="langBtn" type="button"></button>
+      <button id="langBtn" type="button" class="lang" data-i18n="lang_toggle">العربية</button>
     </nav>
   </header>
   <main>
     <form id="loginForm" class="panel login">
-      <img src="/logo.png" alt="جولات" width="96" height="51">
       <h2 data-i18n="login_title"></h2>
       <label><span data-i18n="username"></span><input name="username" type="text" autocomplete="username" required></label>
       <label><span data-i18n="password"></span><input name="password" type="password" autocomplete="current-password" required></label>
@@ -35,100 +27,277 @@
       <p id="loginErr" class="error" role="alert"></p>
     </form>
 
-    <section id="left" class="hidden">
-      <form id="addForm" class="panel">
-        <h2 data-i18n="add_scout"></h2>
-        <div class="row">
-          <input name="name" type="text" maxlength="60" data-i18n-ph="scout_name" aria-label="Scout name" required>
-          <button class="btn" type="submit" data-i18n="add"></button>
-        </div>
-      </form>
-      <ul id="list" class="scout-list"></ul>
-    </section>
+    <div id="app" class="hidden">
+      <div class="tabs" role="tablist">
+        <button id="btn-scouts" type="button" role="tab" data-i18n="tab_scouts"></button>
+        <button id="btn-activities" type="button" role="tab" data-i18n="tab_activities"></button>
+        <button id="btn-leaders" type="button" role="tab" data-i18n="tab_leaders"></button>
+      </div>
+      <p id="toast" class="error" role="status"></p>
 
-    <section id="right" class="detail hidden"></section>
+      <div id="tab-scouts" class="cols">
+        <section>
+          <form id="addForm" class="panel">
+            <h2 data-i18n="add_scout"></h2>
+            <div class="row">
+              <input name="name" type="text" maxlength="60" data-i18n-ph="scout_name" aria-label="Scout name" required>
+              <button class="btn" type="submit" data-i18n="add"></button>
+            </div>
+          </form>
+          <ul id="list" class="scout-list"></ul>
+        </section>
+        <section id="right" class="detail"></section>
+      </div>
+
+      <div id="tab-activities" class="hidden">
+        <div class="panel">
+          <h2 data-i18n="activities_title"></h2>
+          <p class="hint" data-i18n="activity_hint"></p>
+          <ul id="actList" class="simple-list"></ul>
+          <form id="actForm">
+            <h3 data-i18n="add_activity"></h3>
+            <div class="grid2">
+              <label><span data-i18n="name_en"></span><input name="name_en" type="text" maxlength="60"></label>
+              <label><span data-i18n="name_ar"></span><input name="name_ar" type="text" maxlength="60" dir="rtl"></label>
+            </div>
+            <label><span data-i18n="xp_value"></span><input name="xp" type="number" min="1" max="10000" step="1" required style="max-width:10rem"></label>
+            <button class="btn" type="submit" data-i18n="add"></button>
+          </form>
+        </div>
+      </div>
+
+      <div id="tab-leaders" class="hidden">
+        <div class="panel">
+          <h2 data-i18n="leaders_title"></h2>
+          <ul id="leaderList" class="simple-list"></ul>
+          <form id="leaderForm">
+            <h3 data-i18n="add_leader"></h3>
+            <div class="grid2">
+              <label><span data-i18n="username"></span><input name="username" type="text" autocomplete="off" pattern="[A-Za-z0-9_.\-]{3,40}" required></label>
+              <label><span data-i18n="password"></span><input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
+            </div>
+            <p class="hint" data-i18n="pw_hint"></p>
+            <button class="btn" type="submit" data-i18n="add"></button>
+          </form>
+        </div>
+        <form id="pwForm" class="panel">
+          <h2 data-i18n="change_password"></h2>
+          <div class="grid2">
+            <label><span data-i18n="current_password"></span><input name="current" type="password" autocomplete="current-password" required></label>
+            <label><span data-i18n="new_password"></span><input name="next" type="password" autocomplete="new-password" minlength="8" required></label>
+          </div>
+          <button class="btn" type="submit" data-i18n="save"></button>
+        </form>
+      </div>
+    </div>
   </main>
-  <p id="toast" class="error" role="alert" style="text-align:center"></p>
   <script src="/common.js"></script>
   <script>
     const $ = (id) => document.getElementById(id);
-    let scouts = [], current = null, data = null;
+    let scouts = [], current = null, data = null, det = null, acts = [], leaders = [], me = '';
+    const TABS = ['scouts', 'activities', 'leaders'];
 
-    const show = (authed) => {
+    const msg = (text, ok) => { $('toast').textContent = text || ''; $('toast').className = 'error' + (ok ? ' ok' : ''); };
+    const fail = (e) => { if (e.status === 401 && e.code === 'unauthorized') show(false); msg(errText(e)); };
+
+    function show(authed) {
       $('loginForm').classList.toggle('hidden', authed);
-      $('left').classList.toggle('hidden', !authed);
-      $('right').classList.toggle('hidden', !authed);
+      $('app').classList.toggle('hidden', !authed);
       $('logoutBtn').classList.toggle('hidden', !authed);
-    };
-    const fail = (e) => {
-      if (e.status === 401 && e.code === 'unauthorized') show(false);
-      $('toast').textContent = errText(e);
-    };
+    }
+    function showTab(n) {
+      msg('');
+      TABS.forEach((x) => {
+        $('tab-' + x).classList.toggle('hidden', x !== n);
+        $('btn-' + x).setAttribute('aria-selected', String(x === n));
+      });
+      if (n === 'activities') loadActs();
+      if (n === 'leaders') loadLeaders();
+    }
+    TABS.forEach((x) => $('btn-' + x).addEventListener('click', () => showTab(x)));
 
-    async function loadScouts() { scouts = rankScouts(await api('/api/scouts')); drawList(); }
+    // ---------- scouts ----------
+    async function loadScouts() { scouts = await api('/api/scouts'); drawList(); }
     function drawList() { renderScoutList($('list'), scouts, current, openScout); }
 
     async function openScout(id) {
       current = id; drawList();
-      try { data = await api('/api/scouts/' + id); } catch (e) { data = null; fail(e); }
+      try {
+        [data, det] = await Promise.all([api('/api/scouts/' + id), api('/api/leader/scouts/' + id), loadActsQuiet()]);
+      } catch (e) { data = det = null; fail(e); }
       drawDetail();
+    }
+    async function loadActsQuiet() { if (!acts.length) acts = await api('/api/activities'); }
+
+    function field(key, name, value, type = 'text', extra = {}) {
+      const input = type === 'textarea'
+        ? el('textarea', { name, maxlength: extra.max || 1000 }, value || '')
+        : el('input', { name, type, maxlength: extra.max || 120, value: value || '', ...(extra.required ? { required: '' } : {}) });
+      return el('label', {}, t(key), input);
+    }
+
+    function resizeImage(file, size = 256) {
+      return new Promise((resolve, reject) => {
+        const img = new Image(), url = URL.createObjectURL(file);
+        img.onload = () => {
+          const s = Math.min(img.width, img.height), c = document.createElement('canvas');
+          c.width = c.height = size;
+          c.getContext('2d').drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, size, size);
+          URL.revokeObjectURL(url);
+          resolve(c.toDataURL('image/jpeg', 0.85));
+        };
+        img.onerror = () => reject(Object.assign(new Error('invalid_input'), { code: 'invalid_input' }));
+        img.src = url;
+      });
     }
 
     function drawDetail() {
       const box = $('right');
       box.replaceChildren();
-      if (!data) return box.append(el('p', { class: 'empty' }, t('select_scout')));
+      if (!data || !det) return box.append(el('p', { class: 'empty' }, t('select_scout')));
+      const refresh = async () => { await loadScouts(); await openScout(data.id); };
 
-      const form = el('form', { class: 'panel' },
+      // award XP from the activity list
+      const sel = el('select', { name: 'activity_id', required: '', 'aria-label': t('activity_select') },
+        el('option', { value: '' }, t('activity_select')),
+        acts.map((a) => el('option', { value: a.id }, `${state.lang === 'ar' ? a.name_ar : a.name_en} (+${fmt(a.xp)} ${t('xp')})`)));
+      const awardForm = el('form', { class: 'panel' },
         el('h2', {}, t('award_xp')),
-        el('label', {}, t('activity'), el('input', { name: 'activity', type: 'text', maxlength: '100', required: '' })),
-        el('label', {}, t('xp_amount'), el('input', { name: 'xp', type: 'number', step: '1', min: '-10000', max: '10000', required: '' })),
-        el('p', { class: 'hint' }, t('xp_hint')),
+        el('label', {}, t('activity_select'), sel),
         el('label', {}, t('note'), el('input', { name: 'note', type: 'text', maxlength: '200' })),
         el('button', { class: 'btn', type: 'submit' }, t('award')));
+      awardForm.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        const f = new FormData(awardForm);
+        try { await api(`/api/scouts/${data.id}/xp`, 'POST', { activity_id: Number(f.get('activity_id')), note: f.get('note') }); msg(''); await refresh(); }
+        catch (e) { fail(e); }
+      });
+
+      // photo
+      const file = el('input', { type: 'file', accept: 'image/*', class: 'hidden' });
+      file.addEventListener('change', async () => {
+        if (!file.files[0]) return;
+        try { await api(`/api/scouts/${data.id}/photo`, 'PUT', { image: await resizeImage(file.files[0]) }); msg(''); await refresh(); }
+        catch (e) { fail(e); }
+      });
+      const photoRow = el('div', { class: 'row', style: 'margin-bottom:1rem' },
+        avatar(data, true),
+        el('button', { class: 'btn ghost small', type: 'button', onclick: () => file.click() }, t('change_photo')),
+        data.has_photo ? el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
+          try { await api(`/api/scouts/${data.id}/photo`, 'DELETE'); await refresh(); } catch (e) { fail(e); }
+        } }, t('remove_photo')) : '', file);
+
+      // details (public name + private fields)
+      const form = el('form', { class: 'panel' },
+        el('h2', {}, t('details')), photoRow,
+        field('d_name', 'name', det.name, 'text', { max: 60, required: true }),
+        el('p', { class: 'hint' }, t('public_field')),
+        el('p', { class: 'hint private' }, t('private_section')),
+        el('div', { class: 'grid2' },
+          field('d_full_name', 'full_name', det.full_name),
+          field('d_group', 'group_name', det.group_name, 'text', { max: 60 }),
+          field('d_phone', 'phone', det.phone, 'text', { max: 40 }),
+          field('d_join_date', 'join_date', det.join_date, 'date'),
+          field('d_birth_date', 'birth_date', det.birth_date, 'date'),
+          field('d_guardian_name', 'guardian_name', det.guardian_name),
+          field('d_guardian_phone', 'guardian_phone', det.guardian_phone, 'text', { max: 40 })),
+        field('d_address', 'address', det.address, 'textarea', { max: 300 }),
+        field('d_medical', 'medical_notes', det.medical_notes, 'textarea'),
+        field('d_notes', 'notes', det.notes, 'textarea'),
+        el('button', { class: 'btn', type: 'submit' }, t('save')));
       form.addEventListener('submit', async (ev) => {
         ev.preventDefault();
-        const f = new FormData(form);
-        try {
-          await api(`/api/scouts/${data.id}/xp`, 'POST', { activity: f.get('activity'), xp: Number(f.get('xp')), note: f.get('note') });
-          $('toast').textContent = '';
-          await loadScouts(); await openScout(data.id);
-        } catch (e) { fail(e); }
+        try { await api('/api/scouts/' + data.id, 'PUT', Object.fromEntries(new FormData(form))); await refresh(); msg(t('saved'), true); }
+        catch (e) { fail(e); }
       });
 
       const del = el('button', { class: 'btn quiet', type: 'button', style: 'margin-top:1.5rem', onclick: async () => {
         if (!confirm(t('confirm_delete'))) return;
-        try { await api('/api/scouts/' + data.id, 'DELETE'); current = null; data = null; await loadScouts(); drawDetail(); }
+        try { await api('/api/scouts/' + data.id, 'DELETE'); current = null; data = det = null; await loadScouts(); drawDetail(); }
         catch (e) { fail(e); }
       } }, t('delete_scout'));
 
-      box.append(renderDetailHead(data), form, renderLog(data, async (xpId) => {
-        if (!confirm(t('confirm_undo'))) return;
-        try { await api('/api/xp/' + xpId, 'DELETE'); await loadScouts(); await openScout(data.id); } catch (e) { fail(e); }
-      }), del);
+      box.append(renderDetailHead(data), awardForm,
+        renderLog(data, async (xpId) => {
+          if (!confirm(t('confirm_undo'))) return;
+          try { await api('/api/xp/' + xpId, 'DELETE'); await refresh(); } catch (e) { fail(e); }
+        }),
+        el('div', { style: 'height:1.25rem' }), form, del);
     }
 
+    $('addForm').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      try {
+        const s = await api('/api/scouts', 'POST', { name: new FormData(ev.target).get('name') });
+        ev.target.reset(); msg(''); await loadScouts(); await openScout(s.id);
+      } catch (e) { fail(e); }
+    });
+
+    // ---------- activities ----------
+    async function loadActs() { try { acts = await api('/api/activities'); drawActs(); } catch (e) { fail(e); } }
+    function drawActs() {
+      $('actList').replaceChildren(...acts.map((a) => el('li', {},
+        el('span', { class: 'grow' }, state.lang === 'ar' ? a.name_ar : a.name_en),
+        el('b', {}, `+${fmt(a.xp)} ${t('xp')}`),
+        el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
+          if (!confirm(t('confirm_delete_activity'))) return;
+          try { await api('/api/activities/' + a.id, 'DELETE'); await loadActs(); } catch (e) { fail(e); }
+        } }, t('delete')))));
+    }
+    $('actForm').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const f = new FormData(ev.target);
+      try { await api('/api/activities', 'POST', { name_en: f.get('name_en'), name_ar: f.get('name_ar'), xp: Number(f.get('xp')) }); ev.target.reset(); msg(''); await loadActs(); }
+      catch (e) { fail(e); }
+    });
+
+    // ---------- leaders ----------
+    async function loadLeaders() { try { leaders = await api('/api/leaders'); drawLeaders(); } catch (e) { fail(e); } }
+    function drawLeaders() {
+      $('leaderList').replaceChildren(...leaders.map((l) => el('li', {},
+        el('span', { class: 'grow' }, l.username, l.username === me ? ` ${t('you')}` : ''),
+        l.username === me ? '' : el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
+          if (!confirm(t('confirm_delete_leader'))) return;
+          try { await api('/api/leaders/' + l.id, 'DELETE'); await loadLeaders(); } catch (e) { fail(e); }
+        } }, t('delete')))));
+    }
+    $('leaderForm').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const f = new FormData(ev.target);
+      try { await api('/api/leaders', 'POST', { username: f.get('username'), password: f.get('password') }); ev.target.reset(); msg(t('saved'), true); await loadLeaders(); }
+      catch (e) { fail(e); }
+    });
+    $('pwForm').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const f = new FormData(ev.target);
+      try { await api('/api/me/password', 'PUT', { current: f.get('current'), next: f.get('next') }); ev.target.reset(); msg(t('saved'), true); }
+      catch (e) { fail(e); }
+    });
+
+    // ---------- login / boot ----------
+    async function enter(username) {
+      me = username; show(true); showTab('scouts');
+      try { acts = await api('/api/activities'); await loadScouts(); } catch (e) { fail(e); }
+      drawDetail();
+    }
     $('loginForm').addEventListener('submit', async (ev) => {
       ev.preventDefault();
       const f = new FormData(ev.target);
       try {
-        await api('/api/login', 'POST', { username: f.get('username'), password: f.get('password') });
-        $('loginErr').textContent = ''; ev.target.reset();
-        show(true); await loadScouts(); drawDetail();
+        const r = await api('/api/login', 'POST', { username: f.get('username'), password: f.get('password') });
+        $('loginErr').textContent = ''; ev.target.reset(); await enter(r.username);
       } catch (e) { $('loginErr').textContent = errText(e); }
     });
-    $('logoutBtn').addEventListener('click', async () => { await api('/api/logout', 'POST'); data = null; current = null; show(false); });
-    $('addForm').addEventListener('submit', async (ev) => {
-      ev.preventDefault();
-      const name = new FormData(ev.target).get('name');
-      try { const s = await api('/api/scouts', 'POST', { name }); ev.target.reset(); await loadScouts(); await openScout(s.id); }
-      catch (e) { fail(e); }
+    $('logoutBtn').addEventListener('click', async () => { await api('/api/logout', 'POST'); data = det = null; current = null; show(false); });
+
+    document.addEventListener('langchange', () => {
+      if ($('app').classList.contains('hidden')) return;
+      drawList(); drawDetail(); drawActs(); drawLeaders();
     });
-    document.addEventListener('langchange', () => { drawList(); if (!$('right').classList.contains('hidden')) drawDetail(); });
 
     (async () => {
       await initLang();
-      try { await api('/api/me'); show(true); await loadScouts(); drawDetail(); } catch { show(false); }
+      try { const r = await api('/api/me'); await enter(r.username); } catch { show(false); }
     })();
   </script>
 </body>

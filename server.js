@@ -14,25 +14,34 @@ if (!SECRET || !process.env.DATABASE_URL) {
 }
 
 const app = express();
-app.set('trust proxy', 1); // Render sits behind a proxy
-app.use(express.json());
+app.set('trust proxy', 1);
+app.use(express.json({ limit: '600kb' }));
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
 
-const wrap = (fn) => (req, res, next) => fn(req, res, next).catch(next);
+const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const bad = (res, code = 'invalid_input', status = 400) => res.status(status).json({ error: code });
+const invalid = () => Object.assign(new Error('invalid_input'), { status: 400 });
+const intId = (v) => { const n = parseInt(v, 10); if (!Number.isInteger(n)) throw invalid(); return n; };
+const text = (v, max) => { const s = String(v ?? '').trim(); if (s.length > max) throw invalid(); return s || null; };
+const date = (v) => {
+  const s = String(v ?? '').trim();
+  if (!s) return null;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || isNaN(Date.parse(s))) throw invalid();
+  return s;
+};
 
 // ---- auth ----
-function requireLeader(req, res, next) {
-  try {
-    req.leader = jwt.verify(req.cookies.token, SECRET);
-    next();
-  } catch {
-    bad(res, 'unauthorized', 401);
-  }
-}
+const requireLeader = wrap(async (req, res, next) => {
+  let p;
+  try { p = jwt.verify(req.cookies.token, SECRET); } catch { return bad(res, 'unauthorized', 401); }
+  const { rows } = await pool.query('SELECT id, username FROM leaders WHERE id = $1', [p.id]);
+  if (!rows[0]) return bad(res, 'unauthorized', 401); // e.g. leader was deleted
+  req.leader = rows[0];
+  next();
+});
 
-const attempts = new Map(); // ip -> { n, reset }
+const attempts = new Map();
 function loginLimiter(req, res, next) {
   const now = Date.now();
   let a = attempts.get(req.ip);
@@ -46,30 +55,32 @@ function loginLimiter(req, res, next) {
 app.post('/api/login', loginLimiter, wrap(async (req, res) => {
   const { username, password } = req.body || {};
   if (typeof username !== 'string' || typeof password !== 'string') return bad(res, 'invalid_login', 401);
-  const { rows } = await pool.query('SELECT * FROM leaders WHERE username = $1', [username.trim()]);
+  const { rows } = await pool.query('SELECT * FROM leaders WHERE username = $1', [username.trim().toLowerCase()]);
   const leader = rows[0];
   if (!leader || !(await bcrypt.compare(password, leader.password_hash))) return bad(res, 'invalid_login', 401);
-  const token = jwt.sign({ id: leader.id, username: leader.username }, SECRET, { expiresIn: '12h' });
+  const token = jwt.sign({ id: leader.id }, SECRET, { expiresIn: '12h' });
   res.cookie('token', token, {
-    httpOnly: true,
-    sameSite: 'lax',
-    secure: process.env.NODE_ENV === 'production',
-    maxAge: 12 * 60 * 60 * 1000,
+    httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 12 * 60 * 60 * 1000,
   });
   res.json({ username: leader.username });
 }));
 
-app.post('/api/logout', (req, res) => {
-  res.clearCookie('token');
-  res.json({ ok: true });
-});
-
+app.post('/api/logout', (req, res) => { res.clearCookie('token'); res.json({ ok: true }); });
 app.get('/api/me', requireLeader, (req, res) => res.json({ username: req.leader.username }));
 
-// ---- public: dashboard data ----
+app.put('/api/me/password', requireLeader, wrap(async (req, res) => {
+  const { current, next } = req.body || {};
+  if (typeof next !== 'string' || next.length < 8 || next.length > 200) return bad(res, 'weak_password');
+  const { rows } = await pool.query('SELECT password_hash FROM leaders WHERE id = $1', [req.leader.id]);
+  if (typeof current !== 'string' || !(await bcrypt.compare(current, rows[0].password_hash))) return bad(res, 'wrong_password', 403);
+  await pool.query('UPDATE leaders SET password_hash = $1 WHERE id = $2', [await bcrypt.hash(next, 12), req.leader.id]);
+  res.json({ ok: true });
+}));
+
+// ---- public: dashboard data (display name, photo, XP, activity only) ----
 app.get('/api/scouts', wrap(async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT s.id, s.name, COALESCE(SUM(x.xp), 0)::int AS total_xp
+    `SELECT s.id, s.name, s.photo_v, (s.photo IS NOT NULL) AS has_photo, COALESCE(SUM(x.xp), 0)::int AS total_xp
      FROM scouts s LEFT JOIN xp_log x ON x.scout_id = s.id
      GROUP BY s.id ORDER BY total_xp DESC, s.name`
   );
@@ -77,74 +88,160 @@ app.get('/api/scouts', wrap(async (req, res) => {
 }));
 
 app.get('/api/scouts/:id', wrap(async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  if (!Number.isInteger(id)) return bad(res);
-  const s = await pool.query('SELECT id, name FROM scouts WHERE id = $1', [id]);
+  const id = intId(req.params.id);
+  const s = await pool.query('SELECT id, name, photo_v, (photo IS NOT NULL) AS has_photo FROM scouts WHERE id = $1', [id]);
   if (!s.rows[0]) return bad(res, 'not_found', 404);
   const log = await pool.query(
-    'SELECT id, activity, xp, note, created_at FROM xp_log WHERE scout_id = $1 ORDER BY created_at DESC, id DESC',
-    [id]
-  );
-  const total = log.rows.reduce((sum, r) => sum + r.xp, 0);
-  res.json({ ...s.rows[0], total_xp: total, log: log.rows });
+    'SELECT id, activity, activity_ar, xp, note, created_at FROM xp_log WHERE scout_id = $1 ORDER BY created_at DESC, id DESC', [id]);
+  res.json({ ...s.rows[0], total_xp: log.rows.reduce((sum, r) => sum + r.xp, 0), log: log.rows });
 }));
 
-// ---- leader only ----
+app.get('/api/scouts/:id/photo', wrap(async (req, res) => {
+  const { rows } = await pool.query('SELECT photo FROM scouts WHERE id = $1', [intId(req.params.id)]);
+  if (!rows[0] || !rows[0].photo) return res.sendStatus(404);
+  res.set('Content-Type', 'image/jpeg').set('Cache-Control', 'public, max-age=31536000, immutable').send(rows[0].photo);
+}));
+
+// ---- leader: scouts ----
+const DETAIL_COLS = 'id, name, full_name, phone, join_date, address, birth_date, guardian_name, guardian_phone, medical_notes, group_name, notes';
+
+app.get('/api/leader/scouts/:id', requireLeader, wrap(async (req, res) => {
+  const { rows } = await pool.query(`SELECT ${DETAIL_COLS} FROM scouts WHERE id = $1`, [intId(req.params.id)]);
+  if (!rows[0]) return bad(res, 'not_found', 404);
+  res.json(rows[0]);
+}));
+
 app.post('/api/scouts', requireLeader, wrap(async (req, res) => {
-  const name = String(req.body?.name || '').trim();
-  if (!name || name.length > 60) return bad(res);
+  const name = text(req.body?.name, 60);
+  if (!name) throw invalid();
   const { rows } = await pool.query('INSERT INTO scouts (name) VALUES ($1) RETURNING id, name', [name]);
   res.status(201).json(rows[0]);
 }));
 
+app.put('/api/scouts/:id', requireLeader, wrap(async (req, res) => {
+  const id = intId(req.params.id);
+  const b = req.body || {};
+  const name = text(b.name, 60);
+  if (!name) throw invalid();
+  const r = await pool.query(
+    `UPDATE scouts SET name=$1, full_name=$2, phone=$3, join_date=$4, address=$5, birth_date=$6,
+       guardian_name=$7, guardian_phone=$8, medical_notes=$9, group_name=$10, notes=$11 WHERE id=$12`,
+    [name, text(b.full_name, 120), text(b.phone, 40), date(b.join_date), text(b.address, 300), date(b.birth_date),
+     text(b.guardian_name, 120), text(b.guardian_phone, 40), text(b.medical_notes, 1000), text(b.group_name, 60),
+     text(b.notes, 1000), id]);
+  if (!r.rowCount) return bad(res, 'not_found', 404);
+  res.json({ ok: true });
+}));
+
 app.delete('/api/scouts/:id', requireLeader, wrap(async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  if (!Number.isInteger(id)) return bad(res);
-  await pool.query('DELETE FROM scouts WHERE id = $1', [id]);
+  await pool.query('DELETE FROM scouts WHERE id = $1', [intId(req.params.id)]);
+  res.json({ ok: true });
+}));
+
+app.put('/api/scouts/:id/photo', requireLeader, wrap(async (req, res) => {
+  const id = intId(req.params.id);
+  const m = /^data:image\/jpeg;base64,([A-Za-z0-9+/=]+)$/.exec(String(req.body?.image || ''));
+  if (!m) throw invalid();
+  const buf = Buffer.from(m[1], 'base64');
+  if (buf.length > 300 * 1024 || buf[0] !== 0xff || buf[1] !== 0xd8) throw invalid();
+  const r = await pool.query('UPDATE scouts SET photo = $1, photo_v = photo_v + 1 WHERE id = $2', [buf, id]);
+  if (!r.rowCount) return bad(res, 'not_found', 404);
+  res.json({ ok: true });
+}));
+
+app.delete('/api/scouts/:id/photo', requireLeader, wrap(async (req, res) => {
+  await pool.query('UPDATE scouts SET photo = NULL, photo_v = photo_v + 1 WHERE id = $1', [intId(req.params.id)]);
   res.json({ ok: true });
 }));
 
 app.post('/api/scouts/:id/xp', requireLeader, wrap(async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  const activity = String(req.body?.activity || '').trim();
-  const note = String(req.body?.note || '').trim();
-  const xp = Number(req.body?.xp);
-  if (!Number.isInteger(id) || !activity || activity.length > 100 || note.length > 200) return bad(res);
-  if (!Number.isInteger(xp) || xp === 0 || Math.abs(xp) > 10000) return bad(res);
+  const id = intId(req.params.id);
+  const note = text(req.body?.note, 200);
+  const a = await pool.query('SELECT * FROM activities WHERE id = $1', [intId(req.body?.activity_id)]);
+  if (!a.rows[0]) return bad(res, 'not_found', 404);
   const exists = await pool.query('SELECT 1 FROM scouts WHERE id = $1', [id]);
   if (!exists.rows[0]) return bad(res, 'not_found', 404);
+  const act = a.rows[0];
   await pool.query(
-    'INSERT INTO xp_log (scout_id, activity, xp, note, leader_id) VALUES ($1, $2, $3, $4, $5)',
-    [id, activity, xp, note || null, req.leader.id]
-  );
+    `INSERT INTO xp_log (scout_id, activity, activity_ar, activity_id, xp, note, leader_id) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+    [id, act.name_en, act.name_ar, act.id, act.xp, note, req.leader.id]);
   res.status(201).json({ ok: true });
 }));
 
 app.delete('/api/xp/:id', requireLeader, wrap(async (req, res) => {
-  const id = parseInt(req.params.id, 10);
-  if (!Number.isInteger(id)) return bad(res);
-  await pool.query('DELETE FROM xp_log WHERE id = $1', [id]);
+  await pool.query('DELETE FROM xp_log WHERE id = $1', [intId(req.params.id)]);
+  res.json({ ok: true });
+}));
+
+// ---- leader: activity list ----
+app.get('/api/activities', requireLeader, wrap(async (req, res) => {
+  const { rows } = await pool.query('SELECT id, name_en, name_ar, xp FROM activities ORDER BY xp, id');
+  res.json(rows);
+}));
+
+app.post('/api/activities', requireLeader, wrap(async (req, res) => {
+  const en = text(req.body?.name_en, 60), ar = text(req.body?.name_ar, 60);
+  const xp = Number(req.body?.xp);
+  if ((!en && !ar) || !Number.isInteger(xp) || xp < 1 || xp > 10000) throw invalid();
+  const { rows } = await pool.query(
+    'INSERT INTO activities (name_en, name_ar, xp) VALUES ($1, $2, $3) RETURNING id', [en || ar, ar || en, xp]);
+  res.status(201).json(rows[0]);
+}));
+
+app.delete('/api/activities/:id', requireLeader, wrap(async (req, res) => {
+  await pool.query('DELETE FROM activities WHERE id = $1', [intId(req.params.id)]);
+  res.json({ ok: true });
+}));
+
+// ---- leader: manage leaders ----
+app.get('/api/leaders', requireLeader, wrap(async (req, res) => {
+  const { rows } = await pool.query('SELECT id, username, created_at FROM leaders ORDER BY id');
+  res.json(rows);
+}));
+
+app.post('/api/leaders', requireLeader, wrap(async (req, res) => {
+  const username = String(req.body?.username || '').trim().toLowerCase();
+  const password = req.body?.password;
+  if (!/^[a-z0-9_.-]{3,40}$/.test(username)) throw invalid();
+  if (typeof password !== 'string' || password.length < 8 || password.length > 200) return bad(res, 'weak_password');
+  try {
+    const { rows } = await pool.query(
+      'INSERT INTO leaders (username, password_hash) VALUES ($1, $2) RETURNING id, username', [username, await bcrypt.hash(password, 12)]);
+    res.status(201).json(rows[0]);
+  } catch (e) {
+    if (e.code === '23505') return bad(res, 'username_taken', 409);
+    throw e;
+  }
+}));
+
+app.delete('/api/leaders/:id', requireLeader, wrap(async (req, res) => {
+  const id = intId(req.params.id);
+  if (id === req.leader.id) return bad(res, 'cannot_delete_self', 400);
+  await pool.query('DELETE FROM leaders WHERE id = $1', [id]);
   res.json({ ok: true });
 }));
 
 app.use((err, req, res, next) => {
+  if (err.status) return res.status(err.status).json({ error: err.message });
   console.error(err);
   res.status(500).json({ error: 'server' });
 });
 
-// ---- startup: schema + first leader ----
+// ---- startup ----
 (async () => {
   await pool.query(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
+  const acts = await pool.query('SELECT COUNT(*)::int AS n FROM activities');
+  if (acts.rows[0].n === 0) {
+    await pool.query(
+      `INSERT INTO activities (name_en, name_ar, xp) VALUES ('Presence','حضور',5), ('Idea','فكرة',3), ('Event','فعالية',10)`);
+  }
   const { rows } = await pool.query('SELECT COUNT(*)::int AS n FROM leaders');
   const { LEADER_USERNAME, LEADER_PASSWORD } = process.env;
   if (rows[0].n === 0 && LEADER_USERNAME && LEADER_PASSWORD) {
-    const hash = await bcrypt.hash(LEADER_PASSWORD, 12);
-    await pool.query('INSERT INTO leaders (username, password_hash) VALUES ($1, $2)', [LEADER_USERNAME, hash]);
+    await pool.query('INSERT INTO leaders (username, password_hash) VALUES ($1, $2)',
+      [LEADER_USERNAME.trim().toLowerCase(), await bcrypt.hash(LEADER_PASSWORD, 12)]);
     console.log(`Created first leader "${LEADER_USERNAME}"`);
   }
   const port = process.env.PORT || 3000;
   app.listen(port, () => console.log(`Listening on ${port}`));
-})().catch((e) => {
-  console.error('Startup failed:', e.message);
-  process.exit(1);
-});
+})().catch((e) => { console.error('Startup failed:', e.message); process.exit(1); });

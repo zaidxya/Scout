@@ -8,9 +8,7 @@ async function setLang(l) {
   localStorage.setItem('lang', l);
   document.documentElement.lang = l;
   document.documentElement.dir = l === 'ar' ? 'rtl' : 'ltr';
-  document.title = 'Jawalat · ' + t('title');
-  const lb = document.getElementById('langBtn');
-  if (lb) lb.textContent = t('lang_toggle');
+  document.title = t('title');
   document.querySelectorAll('[data-i18n]').forEach((e) => (e.textContent = t(e.dataset.i18n)));
   document.querySelectorAll('[data-i18n-ph]').forEach((e) => (e.placeholder = t(e.dataset.i18nPh)));
   document.dispatchEvent(new Event('langchange'));
@@ -50,18 +48,12 @@ const locale = () => (state.lang === 'ar' ? 'ar-EG' : 'en');
 const fmt = (n) => Number(n).toLocaleString(locale());
 const fmtDate = (d) => new Date(d).toLocaleDateString(locale(), { year: 'numeric', month: 'short', day: 'numeric' });
 const errText = (e) => t('err_' + (e.code || 'server'));
+const actName = (r) => (state.lang === 'ar' ? r.activity_ar || r.activity : r.activity);
 
-// XP needed per level. Purely cosmetic (derived from total XP), so safe to tune.
-const XP_PER_LEVEL = 100;
-
-// Adds rank (ties share a rank) and pct (share of the top score) to a list sorted by XP desc.
-function rankScouts(list) {
-  const max = Math.max(1, ...list.map((s) => s.total_xp));
-  list.forEach((s, i) => {
-    s.rank = i > 0 && s.total_xp === list[i - 1].total_xp ? list[i - 1].rank : i + 1;
-    s.pct = Math.max(0, Math.round((s.total_xp / max) * 100));
-  });
-  return list;
+function avatar(s, big) {
+  const cls = 'avatar' + (big ? ' big' : '');
+  if (s.has_photo) return el('img', { class: cls, src: `/api/scouts/${s.id}/photo?v=${s.photo_v}`, alt: '' });
+  return el('span', { class: cls + ' initial', 'aria-hidden': 'true' }, [...s.name][0] || '?');
 }
 
 function renderScoutList(ul, scouts, selectedId, onSelect) {
@@ -74,37 +66,27 @@ function renderScoutList(ul, scouts, selectedId, onSelect) {
     ul.append(
       el('li', {},
         el('button', { type: 'button', 'aria-current': String(s.id === selectedId), onclick: () => onSelect(s.id) },
-          el('span', { class: 'rank' + (s.rank <= 3 && s.total_xp > 0 ? ' r' + s.rank : ''), 'aria-label': `${t('rank')} ${fmt(s.rank)}` }, fmt(s.rank)),
-          el('span', { class: 'nm' }, s.name),
-          el('span', { class: 'xp' }, fmt(s.total_xp), ' ', el('small', {}, t('xp'))),
-          el('span', { class: 'bar', 'aria-hidden': 'true' }, el('i', { style: `--w:${s.pct}%` }))))
+          avatar(s), el('span', { class: 'nm' }, s.name), el('span', { class: 'xp' }, `${fmt(s.total_xp)} ${t('xp')}`)))
     )
   );
 }
 
 function renderDetailHead(scout) {
-  const xp = Math.max(0, scout.total_xp);
-  const level = Math.floor(xp / XP_PER_LEVEL) + 1;
-  const into = xp % XP_PER_LEVEL;
-  return el('div', {},
-    el('div', { class: 'detail-head' },
-      el('div', { class: 'badge' }, el('b', {}, fmt(scout.total_xp)), el('span', {}, t('xp'))),
-      el('div', { class: 'meta' }, el('h2', {}, scout.name), el('span', { class: 'lvl' }, `${t('level')} ${fmt(level)}`))),
-    el('div', { class: 'progress' },
-      el('div', { class: 'bar', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': String(XP_PER_LEVEL), 'aria-valuenow': String(into) },
-        el('i', { style: `--w:${into}%` })),
-      el('p', {}, el('span', {}, `${fmt(into)} / ${fmt(XP_PER_LEVEL)} ${t('xp')}`), el('span', {}, `${fmt(XP_PER_LEVEL - into)} ${t('xp')} ${t('to_next')}`))));
+  return el('div', { class: 'detail-head' },
+    avatar(scout, true),
+    el('h2', {}, scout.name),
+    el('div', { class: 'badge' }, el('b', {}, fmt(scout.total_xp)), el('span', {}, t('xp'))));
 }
 
 function renderLog(scout, onUndo) {
-  const wrap = el('div', {}, el('h3', { style: 'margin:0 0 .25rem;font-size:1.05rem' }, t('activity_log')));
-  if (!scout.log.length) return wrap.appendChild(el('p', { class: 'empty' }, t('no_activity'))), wrap;
+  const wrap = el('div', {}, el('h3', {}, t('activity_log')));
+  if (!scout.log.length) { wrap.append(el('p', { class: 'empty' }, t('no_activity'))); return wrap; }
   const ul = el('ul', { class: 'log' });
   scout.log.forEach((r) =>
     ul.append(
       el('li', {},
-        el('div', { class: 'what' }, r.activity, el('small', {}, [fmtDate(r.created_at), r.note ? ` — ${r.note}` : ''].join(''))),
-        el('span', { class: 'gain' + (r.xp < 0 ? ' neg' : '') }, `${r.xp < 0 ? '-' : '+'}${fmt(Math.abs(r.xp))}`),
+        el('div', { class: 'what' }, actName(r), el('small', {}, fmtDate(r.created_at) + (r.note ? ` — ${r.note}` : ''))),
+        el('span', { class: 'gain' }, `+${fmt(r.xp)}`),
         onUndo ? el('button', { class: 'btn quiet small', type: 'button', onclick: () => onUndo(r.id) }, t('undo')) : ''))
   );
   wrap.append(ul);
