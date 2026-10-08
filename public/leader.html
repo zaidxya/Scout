@@ -32,6 +32,7 @@
         <button id="btn-scouts" type="button" role="tab" data-i18n="tab_scouts"></button>
         <button id="btn-activities" type="button" role="tab" data-i18n="tab_activities"></button>
         <button id="btn-leaders" type="button" role="tab" data-i18n="tab_leaders"></button>
+        <button id="btn-log" type="button" role="tab" data-i18n="tab_log"></button>
       </div>
       <p id="toast" class="error" role="status"></p>
 
@@ -66,6 +67,13 @@
         </div>
       </div>
 
+      <div id="tab-log" class="hidden">
+        <div class="panel">
+          <h2 data-i18n="log_title"></h2>
+          <ul id="logList" class="simple-list"></ul>
+        </div>
+      </div>
+
       <div id="tab-leaders" class="hidden">
         <div class="panel">
           <h2 data-i18n="leaders_title"></h2>
@@ -95,7 +103,7 @@
   <script>
     const $ = (id) => document.getElementById(id);
     let scouts = [], current = null, data = null, det = null, acts = [], leaders = [], me = '';
-    const TABS = ['scouts', 'activities', 'leaders'];
+    const TABS = ['scouts', 'activities', 'leaders', 'log'];
 
     const msg = (text, ok) => { $('toast').textContent = text || ''; $('toast').className = 'error' + (ok ? ' ok' : ''); };
     const fail = (e) => { if (e.status === 401 && e.code === 'unauthorized') show(false); msg(errText(e)); };
@@ -115,6 +123,7 @@
       });
       if (n === 'activities') loadActs();
       if (n === 'leaders') loadLeaders();
+      if (n === 'log') loadLog();
     }
     TABS.forEach((x) => $('btn-' + x).addEventListener('click', () => showTab(x)));
 
@@ -214,14 +223,14 @@
       });
 
       const del = el('button', { class: 'btn quiet', type: 'button', style: 'margin-top:1.5rem', onclick: async () => {
-        if (!confirm(t('confirm_delete'))) return;
+        if (!(await confirmBox(t('confirm_delete'), t('delete_scout')))) return;
         try { await api('/api/scouts/' + data.id, 'DELETE'); current = null; data = det = null; await loadScouts(); drawDetail(); }
         catch (e) { fail(e); }
       } }, t('delete_scout'));
 
       box.append(renderDetailHead(data), awardForm,
         renderLog(data, async (xpId) => {
-          if (!confirm(t('confirm_undo'))) return;
+          if (!(await confirmBox(t('confirm_undo'), t('undo')))) return;
           try { await api('/api/xp/' + xpId, 'DELETE'); await refresh(); } catch (e) { fail(e); }
         }),
         el('div', { style: 'height:1.25rem' }), form, del);
@@ -242,7 +251,7 @@
         el('span', { class: 'grow' }, state.lang === 'ar' ? a.name_ar : a.name_en),
         el('b', {}, `+${fmt(a.xp)} ${t('xp')}`),
         el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
-          if (!confirm(t('confirm_delete_activity'))) return;
+          if (!(await confirmBox(t('confirm_delete_activity')))) return;
           try { await api('/api/activities/' + a.id, 'DELETE'); await loadActs(); } catch (e) { fail(e); }
         } }, t('delete')))));
     }
@@ -253,13 +262,37 @@
       catch (e) { fail(e); }
     });
 
+    // ---------- activity log ----------
+    let logRows = [];
+    async function loadLog() { try { logRows = await api('/api/audit'); drawLog(); } catch (e) { fail(e); } }
+    function describe(r) {
+      const m = r.meta || {}, ar = state.lang === 'ar';
+      const act = ar ? m.activity_ar : m.activity_en;
+      const verb = t('audit_' + r.action);
+      switch (r.action) {
+        case 'xp_award': return `${verb} +${fmt(m.xp)} ${t('xp')} (${act}) ${t('audit_to')} ${m.name}`;
+        case 'xp_undo': return `${verb} +${fmt(m.xp)} ${t('xp')} (${act}) ${t('audit_from')} ${m.name}`;
+        case 'activity_add': return `${verb} ${ar ? m.name_ar : m.name_en} (+${fmt(m.xp)} ${t('xp')})`;
+        case 'activity_delete': return `${verb} ${ar ? m.name_ar : m.name_en}`;
+        case 'login': case 'logout': case 'password_change': return verb;
+        default: return `${verb} ${m.name || ''}`;
+      }
+    }
+    function drawLog() {
+      const ul = $('logList');
+      if (!logRows.length) { ul.replaceChildren(el('li', { class: 'empty' }, t('log_empty'))); return; }
+      ul.replaceChildren(...logRows.map((r) => el('li', {},
+        el('span', { class: 'grow' }, el('b', {}, r.leader_name), ' ', describe(r),
+          el('small', { style: 'display:block;opacity:.7' }, new Date(r.created_at).toLocaleString(locale(), { dateStyle: 'medium', timeStyle: 'short' }))))));
+    }
+
     // ---------- leaders ----------
     async function loadLeaders() { try { leaders = await api('/api/leaders'); drawLeaders(); } catch (e) { fail(e); } }
     function drawLeaders() {
       $('leaderList').replaceChildren(...leaders.map((l) => el('li', {},
         el('span', { class: 'grow' }, l.username, l.username === me ? ` ${t('you')}` : ''),
         l.username === me ? '' : el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
-          if (!confirm(t('confirm_delete_leader'))) return;
+          if (!(await confirmBox(t('confirm_delete_leader')))) return;
           try { await api('/api/leaders/' + l.id, 'DELETE'); await loadLeaders(); } catch (e) { fail(e); }
         } }, t('delete')))));
     }
@@ -294,7 +327,7 @@
 
     document.addEventListener('langchange', () => {
       if ($('app').classList.contains('hidden')) return;
-      drawList(); drawDetail(); drawActs(); drawLeaders();
+      drawList(); drawDetail(); drawActs(); drawLeaders(); drawLog();
     });
 
     (async () => {

@@ -1,5 +1,6 @@
 require('dotenv').config();
 const express = require('express');
+const morgan = require('morgan');
 const cookieParser = require('cookie-parser');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
@@ -15,6 +16,8 @@ if (!SECRET || !process.env.DATABASE_URL) {
 
 const app = express();
 app.set('trust proxy', 1);
+// one log line per page/API request (shows up in Render's Logs tab); skips static assets and photos
+app.use(morgan('combined', { skip: (req) => /\.(js|css|png|jpe?g|ico|svg|json|woff2?)$/i.test(req.path) || /\/photo$/.test(req.path) }));
 app.use(express.json({ limit: '600kb' }));
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
@@ -41,6 +44,14 @@ const requireLeader = wrap(async (req, res, next) => {
   next();
 });
 
+// ---- audit log: who did what (never stores passwords or private scout details) ----
+function audit(leader, action, meta) {
+  pool.query('INSERT INTO audit_log (leader_id, leader_name, action, meta) VALUES ($1,$2,$3,$4)',
+    [leader.id, leader.username, action, meta ? JSON.stringify(meta) : null])
+    .catch((e) => console.error('audit failed:', e.message));
+}
+const scoutName = async (id) => (await pool.query('SELECT name FROM scouts WHERE id = $1', [id])).rows[0]?.name || null;
+
 const attempts = new Map();
 function loginLimiter(req, res, next) {
   const now = Date.now();
@@ -57,7 +68,11 @@ app.post('/api/login', loginLimiter, wrap(async (req, res) => {
   if (typeof username !== 'string' || typeof password !== 'string') return bad(res, 'invalid_login', 401);
   const { rows } = await pool.query('SELECT * FROM leaders WHERE username = $1', [username.trim().toLowerCase()]);
   const leader = rows[0];
-  if (!leader || !(await bcrypt.compare(password, leader.password_hash))) return bad(res, 'invalid_login', 401);
+  if (!leader || !(await bcrypt.compare(password, leader.password_hash))) {
+    console.log(`Failed login for "${username.slice(0, 40)}" from ${req.ip}`);
+    return bad(res, 'invalid_login', 401);
+  }
+  audit(leader, 'login');
   const token = jwt.sign({ id: leader.id }, SECRET, { expiresIn: '12h' });
   res.cookie('token', token, {
     httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 12 * 60 * 60 * 1000,
@@ -65,7 +80,15 @@ app.post('/api/login', loginLimiter, wrap(async (req, res) => {
   res.json({ username: leader.username });
 }));
 
-app.post('/api/logout', (req, res) => { res.clearCookie('token'); res.json({ ok: true }); });
+app.post('/api/logout', wrap(async (req, res) => {
+  try {
+    const p = jwt.verify(req.cookies.token, SECRET);
+    const { rows } = await pool.query('SELECT id, username FROM leaders WHERE id = $1', [p.id]);
+    if (rows[0]) audit(rows[0], 'logout');
+  } catch { /* not logged in; nothing to record */ }
+  res.clearCookie('token');
+  res.json({ ok: true });
+}));
 app.get('/api/me', requireLeader, (req, res) => res.json({ username: req.leader.username }));
 
 app.put('/api/me/password', requireLeader, wrap(async (req, res) => {
@@ -74,6 +97,7 @@ app.put('/api/me/password', requireLeader, wrap(async (req, res) => {
   const { rows } = await pool.query('SELECT password_hash FROM leaders WHERE id = $1', [req.leader.id]);
   if (typeof current !== 'string' || !(await bcrypt.compare(current, rows[0].password_hash))) return bad(res, 'wrong_password', 403);
   await pool.query('UPDATE leaders SET password_hash = $1 WHERE id = $2', [await bcrypt.hash(next, 12), req.leader.id]);
+  audit(req.leader, 'password_change');
   res.json({ ok: true });
 }));
 
@@ -115,6 +139,7 @@ app.post('/api/scouts', requireLeader, wrap(async (req, res) => {
   const name = text(req.body?.name, 60);
   if (!name) throw invalid();
   const { rows } = await pool.query('INSERT INTO scouts (name) VALUES ($1) RETURNING id, name', [name]);
+  audit(req.leader, 'scout_add', { name });
   res.status(201).json(rows[0]);
 }));
 
@@ -130,11 +155,15 @@ app.put('/api/scouts/:id', requireLeader, wrap(async (req, res) => {
      text(b.guardian_name, 120), text(b.guardian_phone, 40), text(b.medical_notes, 1000), text(b.group_name, 60),
      text(b.notes, 1000), id]);
   if (!r.rowCount) return bad(res, 'not_found', 404);
+  audit(req.leader, 'scout_update', { name });
   res.json({ ok: true });
 }));
 
 app.delete('/api/scouts/:id', requireLeader, wrap(async (req, res) => {
-  await pool.query('DELETE FROM scouts WHERE id = $1', [intId(req.params.id)]);
+  const id = intId(req.params.id);
+  const name = await scoutName(id);
+  await pool.query('DELETE FROM scouts WHERE id = $1', [id]);
+  if (name) audit(req.leader, 'scout_delete', { name });
   res.json({ ok: true });
 }));
 
@@ -146,11 +175,14 @@ app.put('/api/scouts/:id/photo', requireLeader, wrap(async (req, res) => {
   if (buf.length > 300 * 1024 || buf[0] !== 0xff || buf[1] !== 0xd8) throw invalid();
   const r = await pool.query('UPDATE scouts SET photo = $1, photo_v = photo_v + 1 WHERE id = $2', [buf, id]);
   if (!r.rowCount) return bad(res, 'not_found', 404);
+  audit(req.leader, 'photo_set', { name: await scoutName(id) });
   res.json({ ok: true });
 }));
 
 app.delete('/api/scouts/:id/photo', requireLeader, wrap(async (req, res) => {
-  await pool.query('UPDATE scouts SET photo = NULL, photo_v = photo_v + 1 WHERE id = $1', [intId(req.params.id)]);
+  const id = intId(req.params.id);
+  await pool.query('UPDATE scouts SET photo = NULL, photo_v = photo_v + 1 WHERE id = $1', [id]);
+  audit(req.leader, 'photo_delete', { name: await scoutName(id) });
   res.json({ ok: true });
 }));
 
@@ -165,11 +197,14 @@ app.post('/api/scouts/:id/xp', requireLeader, wrap(async (req, res) => {
   await pool.query(
     `INSERT INTO xp_log (scout_id, activity, activity_ar, activity_id, xp, note, leader_id) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
     [id, act.name_en, act.name_ar, act.id, act.xp, note, req.leader.id]);
+  audit(req.leader, 'xp_award', { name: await scoutName(id), activity_en: act.name_en, activity_ar: act.name_ar, xp: act.xp });
   res.status(201).json({ ok: true });
 }));
 
 app.delete('/api/xp/:id', requireLeader, wrap(async (req, res) => {
-  await pool.query('DELETE FROM xp_log WHERE id = $1', [intId(req.params.id)]);
+  const { rows } = await pool.query(
+    'DELETE FROM xp_log x USING scouts s WHERE x.id = $1 AND s.id = x.scout_id RETURNING s.name, x.activity, x.activity_ar, x.xp', [intId(req.params.id)]);
+  if (rows[0]) audit(req.leader, 'xp_undo', { name: rows[0].name, activity_en: rows[0].activity, activity_ar: rows[0].activity_ar || rows[0].activity, xp: rows[0].xp });
   res.json({ ok: true });
 }));
 
@@ -185,11 +220,13 @@ app.post('/api/activities', requireLeader, wrap(async (req, res) => {
   if ((!en && !ar) || !Number.isInteger(xp) || xp < 1 || xp > 10000) throw invalid();
   const { rows } = await pool.query(
     'INSERT INTO activities (name_en, name_ar, xp) VALUES ($1, $2, $3) RETURNING id', [en || ar, ar || en, xp]);
+  audit(req.leader, 'activity_add', { name_en: en || ar, name_ar: ar || en, xp });
   res.status(201).json(rows[0]);
 }));
 
 app.delete('/api/activities/:id', requireLeader, wrap(async (req, res) => {
-  await pool.query('DELETE FROM activities WHERE id = $1', [intId(req.params.id)]);
+  const { rows } = await pool.query('DELETE FROM activities WHERE id = $1 RETURNING name_en, name_ar', [intId(req.params.id)]);
+  if (rows[0]) audit(req.leader, 'activity_delete', rows[0]);
   res.json({ ok: true });
 }));
 
@@ -207,6 +244,7 @@ app.post('/api/leaders', requireLeader, wrap(async (req, res) => {
   try {
     const { rows } = await pool.query(
       'INSERT INTO leaders (username, password_hash) VALUES ($1, $2) RETURNING id, username', [username, await bcrypt.hash(password, 12)]);
+    audit(req.leader, 'leader_add', { name: rows[0].username });
     res.status(201).json(rows[0]);
   } catch (e) {
     if (e.code === '23505') return bad(res, 'username_taken', 409);
@@ -217,8 +255,14 @@ app.post('/api/leaders', requireLeader, wrap(async (req, res) => {
 app.delete('/api/leaders/:id', requireLeader, wrap(async (req, res) => {
   const id = intId(req.params.id);
   if (id === req.leader.id) return bad(res, 'cannot_delete_self', 400);
-  await pool.query('DELETE FROM leaders WHERE id = $1', [id]);
+  const { rows } = await pool.query('DELETE FROM leaders WHERE id = $1 RETURNING username', [id]);
+  if (rows[0]) audit(req.leader, 'leader_delete', { name: rows[0].username });
   res.json({ ok: true });
+}));
+
+app.get('/api/audit', requireLeader, wrap(async (req, res) => {
+  const { rows } = await pool.query('SELECT id, leader_name, action, meta, created_at FROM audit_log ORDER BY id DESC LIMIT 300');
+  res.json(rows);
 }));
 
 app.use((err, req, res, next) => {

@@ -42,3 +42,13 @@ ALTER TABLE xp_log
   ADD COLUMN IF NOT EXISTS activity_ar TEXT,
   ADD COLUMN IF NOT EXISTS activity_id INT REFERENCES activities(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS xp_log_scout_idx ON xp_log(scout_id);
+
+CREATE TABLE IF NOT EXISTS audit_log (
+  id SERIAL PRIMARY KEY,
+  leader_id INT REFERENCES leaders(id) ON DELETE SET NULL,
+  leader_name TEXT NOT NULL,
+  action TEXT NOT NULL,
+  meta JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS audit_log_created_idx ON audit_log(created_at DESC);

@@ -92,3 +92,24 @@ function renderLog(scout, onUndo) {
   wrap.append(ul);
   return wrap;
 }
+
+// Styled confirmation popup. Usage: if (!(await confirmBox(message, buttonLabel))) return;
+function confirmBox(message, okLabel) {
+  return new Promise((resolve) => {
+    const dlg = el('dialog', { class: 'confirm' },
+      el('h3', {}, t('confirm_title')),
+      el('p', {}, message),
+      el('div', { class: 'actions' },
+        el('button', { class: 'btn ghost', type: 'button', 'data-r': '0' }, t('cancel')),
+        el('button', { class: 'btn danger', type: 'button', 'data-r': '1' }, okLabel || t('delete'))));
+    const done = (v) => { dlg.close(); dlg.remove(); resolve(v); };
+    dlg.addEventListener('click', (e) => {
+      if (e.target === dlg) done(false); // click on the dimmed backdrop
+      else if (e.target.dataset && e.target.dataset.r) done(e.target.dataset.r === '1');
+    });
+    dlg.addEventListener('cancel', (e) => { e.preventDefault(); done(false); }); // Esc key
+    document.body.append(dlg);
+    dlg.showModal();
+    dlg.querySelector('[data-r="0"]').focus(); // safe default: Cancel
+  });
+}
