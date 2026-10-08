@@ -28,8 +28,8 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme=light]) {
     --bg: #25010c;
-    --surface: #36061a;
-    --surface-2: #440d24;
+    --surface: #fbf7f8;
+    --surface-2: #e8e6e7;
     --ink: #f4e8d6;
     --muted: #c4a894;
     --line: #5b1d33;
