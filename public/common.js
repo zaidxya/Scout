@@ -1,4 +1,4 @@
-const state = { lang: 'en', dict: {} };
+const state = { lang: 'ar', dict: {} };
 const t = (k) => state.dict[k] || k;
 
 async function setLang(l) {
@@ -7,7 +7,7 @@ async function setLang(l) {
   state.lang = l;
   localStorage.setItem('lang', l);
   document.documentElement.lang = l;
-  document.documentElement.dir = l === 'ar' ? 'rtl' : 'ltr';
+  document.documentElement.dir = 'rtl'; // layout stays right-to-left in both languages
   document.title = t('title');
   document.querySelectorAll('[data-i18n]').forEach((e) => (e.textContent = t(e.dataset.i18n)));
   document.querySelectorAll('[data-i18n-ph]').forEach((e) => (e.placeholder = t(e.dataset.i18nPh)));
@@ -16,7 +16,7 @@ async function setLang(l) {
 
 function initLang() {
   const saved = localStorage.getItem('lang');
-  const l = saved || ((navigator.language || '').startsWith('ar') ? 'ar' : 'en');
+  const l = saved === 'en' || saved === 'ar' ? saved : 'ar';
   document.getElementById('langBtn').addEventListener('click', () => setLang(state.lang === 'ar' ? 'en' : 'ar'));
   return setLang(l);
 }

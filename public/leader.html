@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="ar" dir="rtl">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -11,7 +11,7 @@
 </head>
 <body>
   <header>
-    <div class="grow"><h1><a href="/" style="border:0;padding:0"><img src="/logo.jpg" alt="جولات"></a></h1><p data-i18n="leader_area"></p></div>
+    <div class="grow"><h1><a href="/" style="border:0;padding:0"><img src="/logo.jpg" alt="جولات"></a></h1><p data-i18n="leader_area"></p><p id="meName" dir="auto" style="font-weight:700;opacity:1;padding-inline-end:1rem;border-inline-end:1px solid rgba(211,173,128,.5)"></p></div>
     <nav>
       <a href="/" data-i18n="home">Dashboard</a>
       <button id="logoutBtn" type="button" class="hidden" data-i18n="logout"></button>
@@ -104,6 +104,8 @@
       $('loginForm').classList.toggle('hidden', authed);
       $('app').classList.toggle('hidden', !authed);
       $('logoutBtn').classList.toggle('hidden', !authed);
+      $('meName').textContent = authed && me ? me : '';
+      $('meName').style.display = authed && me ? '' : 'none';
     }
     function showTab(n) {
       msg('');
