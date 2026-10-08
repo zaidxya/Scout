@@ -8,7 +8,9 @@ async function setLang(l) {
   localStorage.setItem('lang', l);
   document.documentElement.lang = l;
   document.documentElement.dir = l === 'ar' ? 'rtl' : 'ltr';
-  document.title = t('title');
+  document.title = 'Jawalat · ' + t('title');
+  const lb = document.getElementById('langBtn');
+  if (lb) lb.textContent = t('lang_toggle');
   document.querySelectorAll('[data-i18n]').forEach((e) => (e.textContent = t(e.dataset.i18n)));
   document.querySelectorAll('[data-i18n-ph]').forEach((e) => (e.placeholder = t(e.dataset.i18nPh)));
   document.dispatchEvent(new Event('langchange'));
@@ -49,6 +51,19 @@ const fmt = (n) => Number(n).toLocaleString(locale());
 const fmtDate = (d) => new Date(d).toLocaleDateString(locale(), { year: 'numeric', month: 'short', day: 'numeric' });
 const errText = (e) => t('err_' + (e.code || 'server'));
 
+// XP needed per level. Purely cosmetic (derived from total XP), so safe to tune.
+const XP_PER_LEVEL = 100;
+
+// Adds rank (ties share a rank) and pct (share of the top score) to a list sorted by XP desc.
+function rankScouts(list) {
+  const max = Math.max(1, ...list.map((s) => s.total_xp));
+  list.forEach((s, i) => {
+    s.rank = i > 0 && s.total_xp === list[i - 1].total_xp ? list[i - 1].rank : i + 1;
+    s.pct = Math.max(0, Math.round((s.total_xp / max) * 100));
+  });
+  return list;
+}
+
 function renderScoutList(ul, scouts, selectedId, onSelect) {
   ul.replaceChildren();
   if (!scouts.length) {
@@ -59,16 +74,26 @@ function renderScoutList(ul, scouts, selectedId, onSelect) {
     ul.append(
       el('li', {},
         el('button', { type: 'button', 'aria-current': String(s.id === selectedId), onclick: () => onSelect(s.id) },
-          el('span', {}, s.name),
-          el('span', { class: 'xp' }, `${fmt(s.total_xp)} ${t('xp')}`)))
+          el('span', { class: 'rank' + (s.rank <= 3 && s.total_xp > 0 ? ' r' + s.rank : ''), 'aria-label': `${t('rank')} ${fmt(s.rank)}` }, fmt(s.rank)),
+          el('span', { class: 'nm' }, s.name),
+          el('span', { class: 'xp' }, fmt(s.total_xp), ' ', el('small', {}, t('xp'))),
+          el('span', { class: 'bar', 'aria-hidden': 'true' }, el('i', { style: `--w:${s.pct}%` }))))
     )
   );
 }
 
 function renderDetailHead(scout) {
-  return el('div', { class: 'detail-head' },
-    el('div', { class: 'badge' }, el('b', {}, fmt(scout.total_xp)), el('span', {}, t('xp'))),
-    el('h2', {}, scout.name));
+  const xp = Math.max(0, scout.total_xp);
+  const level = Math.floor(xp / XP_PER_LEVEL) + 1;
+  const into = xp % XP_PER_LEVEL;
+  return el('div', {},
+    el('div', { class: 'detail-head' },
+      el('div', { class: 'badge' }, el('b', {}, fmt(scout.total_xp)), el('span', {}, t('xp'))),
+      el('div', { class: 'meta' }, el('h2', {}, scout.name), el('span', { class: 'lvl' }, `${t('level')} ${fmt(level)}`))),
+    el('div', { class: 'progress' },
+      el('div', { class: 'bar', role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': String(XP_PER_LEVEL), 'aria-valuenow': String(into) },
+        el('i', { style: `--w:${into}%` })),
+      el('p', {}, el('span', {}, `${fmt(into)} / ${fmt(XP_PER_LEVEL)} ${t('xp')}`), el('span', {}, `${fmt(XP_PER_LEVEL - into)} ${t('xp')} ${t('to_next')}`))));
 }
 
 function renderLog(scout, onUndo) {
@@ -79,7 +104,7 @@ function renderLog(scout, onUndo) {
     ul.append(
       el('li', {},
         el('div', { class: 'what' }, r.activity, el('small', {}, [fmtDate(r.created_at), r.note ? ` — ${r.note}` : ''].join(''))),
-        el('span', { class: 'gain' + (r.xp < 0 ? ' neg' : '') }, `${r.xp > 0 ? '+' : ''}${fmt(r.xp)}`),
+        el('span', { class: 'gain' + (r.xp < 0 ? ' neg' : '') }, `${r.xp < 0 ? '-' : '+'}${fmt(Math.abs(r.xp))}`),
         onUndo ? el('button', { class: 'btn quiet small', type: 'button', onclick: () => onUndo(r.id) }, t('undo')) : ''))
   );
   wrap.append(ul);

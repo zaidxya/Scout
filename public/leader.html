@@ -3,22 +3,31 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Scout Tracker</title>
+  <title>Jawalat · Scout Tracker</title>
+  <meta name="theme-color" content="#470217">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="apple-touch-icon" href="/icon-192.png">
+  <link rel="manifest" href="/manifest.webmanifest">
   <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
   <header>
-    <div class="grow"><h1 data-i18n="title">Scout Tracker</h1><p data-i18n="leader_area"></p></div>
+    <a class="brand" href="/">
+      <img src="/logo.png" alt="جولات" width="90" height="48">
+      <div class="titles"><h1 data-i18n="title">Scout Tracker</h1><p data-i18n="leader_area"></p></div>
+    </a>
     <nav>
-      <a href="/" data-i18n="home">Dashboard</a>
+      <a class="pill" href="/" data-i18n="home">Dashboard</a>
       <button id="logoutBtn" type="button" class="hidden" data-i18n="logout"></button>
       <button id="langBtn" type="button"></button>
     </nav>
   </header>
   <main>
     <form id="loginForm" class="panel login">
+      <img src="/logo.png" alt="جولات" width="96" height="51">
       <h2 data-i18n="login_title"></h2>
       <label><span data-i18n="username"></span><input name="username" type="text" autocomplete="username" required></label>
       <label><span data-i18n="password"></span><input name="password" type="password" autocomplete="current-password" required></label>
@@ -56,7 +65,7 @@
       $('toast').textContent = errText(e);
     };
 
-    async function loadScouts() { scouts = await api('/api/scouts'); drawList(); }
+    async function loadScouts() { scouts = rankScouts(await api('/api/scouts')); drawList(); }
     function drawList() { renderScoutList($('list'), scouts, current, openScout); }
 
     async function openScout(id) {

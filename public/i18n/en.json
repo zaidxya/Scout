@@ -2,7 +2,7 @@
   "title": "Scout Tracker",
   "subtitle": "Member activity and XP",
   "lang_toggle": "العربية",
-  "leader_area": "Leader area",
+  "leader_area": "Admin",
   "home": "Dashboard",
   "search": "Search scouts",
   "no_scouts": "No scouts yet.",
@@ -10,7 +10,7 @@
   "select_scout": "Select a scout to see their activity.",
   "activity_log": "Activity log",
   "xp": "XP",
-  "login_title": "Leader login",
+  "login_title": "Admin login",
   "username": "Username",
   "password": "Password",
   "login": "Log in",
@@ -33,5 +33,11 @@
   "err_unauthorized": "Your session expired. Log in again.",
   "err_invalid_input": "Check the details you entered.",
   "err_not_found": "That scout no longer exists.",
-  "err_server": "Something went wrong on the server."
+  "err_server": "Something went wrong on the server.",
+  "rank": "Rank",
+  "level": "Level",
+  "to_next": "to next level",
+  "stat_scouts": "Scouts",
+  "stat_xp": "Total XP",
+  "stat_top": "Top scout"
 }
