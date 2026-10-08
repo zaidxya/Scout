@@ -1,0 +1,21 @@
+CREATE TABLE IF NOT EXISTS leaders (
+  id SERIAL PRIMARY KEY,
+  username TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS scouts (
+  id SERIAL PRIMARY KEY,
+  name TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS xp_log (
+  id SERIAL PRIMARY KEY,
+  scout_id INT NOT NULL REFERENCES scouts(id) ON DELETE CASCADE,
+  activity TEXT NOT NULL,
+  xp INT NOT NULL,
+  note TEXT,
+  leader_id INT REFERENCES leaders(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS xp_log_scout_idx ON xp_log(scout_id);

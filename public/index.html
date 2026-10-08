@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Scout Tracker</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <div class="grow"><h1 data-i18n="title">Scout Tracker</h1><p data-i18n="subtitle"></p></div>
+    <nav>
+      <a href="/leader.html" data-i18n="leader_area">Leader area</a>
+      <button id="langBtn" type="button"></button>
+    </nav>
+  </header>
+  <main>
+    <section>
+      <input id="search" type="search" data-i18n-ph="search" aria-label="Search">
+      <ul id="list" class="scout-list"></ul>
+    </section>
+    <section id="detail" class="detail"></section>
+  </main>
+  <script src="/common.js"></script>
+  <script>
+    const listEl = document.getElementById('list'), detailEl = document.getElementById('detail'), search = document.getElementById('search');
+    let scouts = [], current = null, data = null;
+
+    function drawList() {
+      const q = search.value.trim().toLowerCase();
+      renderScoutList(listEl, scouts.filter((s) => s.name.toLowerCase().includes(q)), current, openScout);
+    }
+    function drawDetail() {
+      detailEl.replaceChildren();
+      if (!data) return detailEl.append(el('p', { class: 'empty' }, t('select_scout')));
+      detailEl.append(renderDetailHead(data), renderLog(data));
+    }
+    async function openScout(id) {
+      current = id;
+      history.replaceState(null, '', '#' + id);
+      drawList();
+      try { data = await api('/api/scouts/' + id); } catch { data = null; }
+      drawDetail();
+    }
+    search.addEventListener('input', drawList);
+    document.addEventListener('langchange', () => { drawList(); drawDetail(); });
+
+    (async () => {
+      await initLang();
+      scouts = await api('/api/scouts');
+      drawList();
+      const id = parseInt(location.hash.slice(1), 10);
+      if (id) openScout(id); else drawDetail();
+    })();
+  </script>
+</body>
+</html>
