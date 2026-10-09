@@ -47,10 +47,6 @@
             </div>
           </form>
           <input id="q" type="search" data-i18n-ph="search_leader" aria-label="Search">
-          <div class="row" style="margin-top:.5rem">
-            <select id="fRole" aria-label="Role"></select>
-            <select id="fTag" aria-label="Tag"></select>
-          </div>
           <ul id="list" class="scout-list"></ul>
         </section>
         <section id="right" class="detail"></section>
@@ -169,27 +165,18 @@
       const names = s.label_ids.map(labelById).filter(Boolean).flatMap((l) => [l.name_en, l.name_ar]);
       return [s.name, s.full_name, s.phone, s.group_name, ...names].some((v) => norm(v).includes(q));
     }
-    function drawFilters() {
-      const fill = (sel, kind, allKey) => {
-        const keep = sel.value;
-        sel.replaceChildren(el('option', { value: '' }, t(allKey)),
-          labels.filter((l) => l.kind === kind).map((l) => el('option', { value: l.id }, labelName(l))));
-        sel.value = [...sel.options].some((o) => o.value === keep) ? keep : '';
-      };
-      fill($('fRole'), 'role', 'all_roles'); fill($('fTag'), 'tag', 'all_tags');
-    }
     function chips(ids) {
       return el('span', { class: 'chips' }, ids.map(labelById).filter(Boolean)
         .map((l) => el('span', { class: 'chip ' + l.kind, style: chipStyle(l) }, labelName(l))));
     }
     function drawList() {
-      const q = norm($('q').value.trim()), fr = Number($('fRole').value), ft = Number($('fTag').value);
-      const shown = scouts.filter((s) => matches(s, q) && (!fr || s.label_ids.includes(fr)) && (!ft || s.label_ids.includes(ft)));
+      const q = norm($('q').value.trim());
+      const shown = scouts.filter((s) => matches(s, q));
       renderScoutList($('list'), shown, current, (id) => openScout(id),
         (s) => el('span', { class: 'sub' }, chips(s.label_ids)),
         scouts.length ? 'no_results' : 'no_scouts');
     }
-    ['q', 'fRole', 'fTag'].forEach((id) => $(id).addEventListener('input', drawList));
+    $('q').addEventListener('input', drawList);
 
     async function openScout(id, scrollNext = true) {
       current = id; drawList();
@@ -367,7 +354,7 @@
     }
 
     // ---------- roles and tags ----------
-    async function loadLabels() { try { labels = await api('/api/labels'); drawLabels(); drawFilters(); drawList(); if (data && det) drawDetail(); } catch (e) { fail(e); } }
+    async function loadLabels() { try { labels = await api('/api/labels'); drawLabels(); drawList(); if (data && det) drawDetail(); } catch (e) { fail(e); } }
     function drawLabels() {
       $('labelLists').replaceChildren(...[['role', 'roles'], ['tag', 'tags']].map(([kind, key]) => {
         const rows = labels.filter((l) => l.kind === kind);
@@ -422,7 +409,7 @@
     // ---------- login / boot ----------
     async function enter(username) {
       me = username; show(true); showTab('scouts');
-      try { [acts, labels] = await Promise.all([api('/api/activities'), api('/api/labels')]); drawFilters(); await loadScouts(); } catch (e) { fail(e); }
+      try { [acts, labels] = await Promise.all([api('/api/activities'), api('/api/labels')]); await loadScouts(); } catch (e) { fail(e); }
       drawDetail();
     }
     $('loginForm').addEventListener('submit', async (ev) => {
@@ -437,7 +424,7 @@
 
     document.addEventListener('langchange', () => {
       if ($('app').classList.contains('hidden')) return;
-      drawFilters(); drawList(); drawDetail(); drawActs(); drawLabels(); drawLeaders(); drawLog();
+      drawList(); drawDetail(); drawActs(); drawLabels(); drawLeaders(); drawLog();
     });
 
     (async () => {

@@ -115,3 +115,4 @@ The English labels were left as they were (for example "Dashboard" and "Leader a
 - XP numbers and the "-5" signs are bidi-isolated so negatives no longer render as "XP 5-" in RTL.
 - Phone sizing: compact detail header (avatar / name / XP badge on one row), larger tap targets (buttons, selects, chip remove, colour swatch), wrapping rows in roles/activities/leaders lists, date inputs normalised for iOS.
 - Declutter pass (phones): header is now two compact rows (logo + title, then equal-width buttons); tighter padding/spacing in panels, forms and the scout detail; empty status line no longer takes space; role/tag rows show the name on one line and controls on the next.
+- Leader area: removed the role and tag filter dropdowns under the search box (search still matches role and tag names).
