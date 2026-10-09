@@ -12,7 +12,7 @@ English and Arabic are built in, and the look follows the Jawlat logo (burgundy 
 **Leaders are scouts too**: every leader account has its own scout profile that appears in the public list, earns XP and can have roles and tags like any scout. Adding a leader creates the profile (optional display name, defaults to the username). Existing leaders get a profile automatically on the next startup. Removing a leader keeps their scout profile; a leader's profile can't be deleted while the leader exists.
 
 **Leader area (`/leader.html`)**: password protected
-- **Search and filter**: the scout list has a search box (name, full name, phone, group, role and tag names in both languages; Arabic spelling variants and diacritics are ignored) plus role and tag filters
+- **Search and filter**: the scout list has a search box (name, full name, phone, role and tag names in both languages; Arabic spelling variants and diacritics are ignored) plus role and tag filters
 - **Roles & tags tab**: create colored roles with a priority (higher priority = listed first, for everyone) (e.g. Patrol leader) and tags (e.g. First aid) with English and Arabic names. Assign them from a scout's page. Roles are shown on the public dashboard (and searchable there); tags are visible to leaders only
 - **Scouts**: add and delete scouts, award XP from the activity list (with an optional note), undo a mistaken entry, upload a profile picture, edit details
 - **Activities**: manage the activity list. Starter list: Presence +5, Idea +3, Event +10, each with an English and an Arabic name. Use a negative value (for example -5) for activities that deduct XP
@@ -27,7 +27,7 @@ The header shows the logged-in leader's username next to the "القيادة" ti
 |---|---|---|
 | Display name, profile picture, roles, XP, activity history | yes | yes |
 | Tags | no | yes |
-| Full name, phone, join date, date of birth, address, patrol/group, guardian name and phone, medical notes, other notes | no | yes |
+| Full name, phone, join date, date of birth, address, guardian name and phone, medical notes, other notes | no | yes |
 
 ## Account levels and password reset
 

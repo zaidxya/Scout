@@ -170,11 +170,11 @@
     const labelById = (id) => labels.find((l) => l.id === id);
     async function loadScouts() { scouts = await api('/api/leader/scouts'); drawList(); }
 
-    // search matches name, full name, phone, group, and the names of assigned roles/tags (both languages)
+    // search matches name, full name, phone, and the names of assigned roles/tags (both languages)
     function matches(s, q) {
       if (!q) return true;
       const names = s.label_ids.map(labelById).filter(Boolean).flatMap((l) => [l.name_en, l.name_ar]);
-      return [s.name, s.full_name, s.phone, s.group_name, ...names].some((v) => norm(v).includes(q));
+      return [s.name, s.full_name, s.phone, ...names].some((v) => norm(v).includes(q));
     }
     function chips(ids) {
       return el('span', { class: 'chips' }, ids.map(labelById).filter(Boolean)
@@ -199,7 +199,14 @@
     }
     async function loadActsQuiet() { if (!acts.length) acts = await api('/api/activities'); }
 
+    // phone fields accept digits only (Arabic-Indic digits are converted to 0-9)
+    const digitsOnly = (v) => String(v || '').replace(/[٠-٩]/g, (d) => d.charCodeAt(0) - 0x660).replace(/[۰-۹]/g, (d) => d.charCodeAt(0) - 0x6f0).replace(/\D/g, '');
     function field(key, name, value, type = 'text', extra = {}) {
+      if (type === 'tel') {
+        const input = el('input', { name, type: 'tel', class: 'phone', inputmode: 'numeric', pattern: '[0-9]*', placeholder: '0000000000', maxlength: extra.max || 40, value: digitsOnly(value), dir: 'ltr' });
+        input.addEventListener('input', () => { const v = digitsOnly(input.value); if (v !== input.value) input.value = v; });
+        return el('label', {}, t(key), input);
+      }
       const input = type === 'textarea'
         ? el('textarea', { name, maxlength: extra.max || 1000 }, value || '')
         : el('input', { name, type, maxlength: extra.max || 120, value: value || '', ...(extra.required ? { required: '' } : {}) });
@@ -284,12 +291,11 @@
         el('p', { class: 'hint private' }, t('private_section')),
         el('div', { class: 'grid2' },
           field('d_full_name', 'full_name', det.full_name),
-          field('d_group', 'group_name', det.group_name, 'text', { max: 60 }),
-          field('d_phone', 'phone', det.phone, 'text', { max: 40 }),
+          field('d_phone', 'phone', det.phone, 'tel', { max: 40 }),
           field('d_join_date', 'join_date', det.join_date, 'date'),
           field('d_birth_date', 'birth_date', det.birth_date, 'date'),
           field('d_guardian_name', 'guardian_name', det.guardian_name),
-          field('d_guardian_phone', 'guardian_phone', det.guardian_phone, 'text', { max: 40 })),
+          field('d_guardian_phone', 'guardian_phone', det.guardian_phone, 'tel', { max: 40 })),
         field('d_address', 'address', det.address, 'textarea', { max: 300 }),
         field('d_medical', 'medical_notes', det.medical_notes, 'textarea'),
         field('d_notes', 'notes', det.notes, 'textarea'),

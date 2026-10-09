@@ -29,6 +29,12 @@ const bad = (res, code = 'invalid_input', status = 400) => res.status(status).js
 const invalid = () => Object.assign(new Error('invalid_input'), { status: 400 });
 const intId = (v) => { const n = parseInt(v, 10); if (!Number.isInteger(n)) throw invalid(); return n; };
 const text = (v, max) => { const s = String(v ?? '').trim(); if (s.length > max) throw invalid(); return s || null; };
+// phone numbers: digits only (Arabic-Indic digits are converted; anything else is dropped)
+const phone = (v) => {
+  const d = String(v ?? '').replace(/[٠-٩]/g, (c) => c.charCodeAt(0) - 0x660).replace(/[۰-۹]/g, (c) => c.charCodeAt(0) - 0x6f0).replace(/\D/g, '');
+  if (d.length > 40) throw invalid();
+  return d || null;
+};
 const date = (v) => {
   const s = String(v ?? '').trim();
   if (!s) return null;
@@ -150,7 +156,7 @@ app.get('/api/scouts/:id/photo', wrap(async (req, res) => {
 // searchable list for leaders: includes private search fields, leader flag and role/tag ids
 app.get('/api/leader/scouts', requireLeader, wrap(async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT s.id, s.name, s.photo_v, (s.photo IS NOT NULL) AS has_photo, s.full_name, s.phone, s.group_name,
+    `SELECT s.id, s.name, s.photo_v, (s.photo IS NOT NULL) AS has_photo, s.full_name, s.phone,
        COALESCE(x.total, 0)::int AS total_xp,
        EXISTS (SELECT 1 FROM leaders l WHERE l.scout_id = s.id) AS is_leader,
        COALESCE((SELECT json_agg(sl.label_id) FROM scout_labels sl WHERE sl.scout_id = s.id), '[]'::json) AS label_ids
@@ -224,7 +230,7 @@ const hexColor = (v) => {
   return s.toLowerCase();
 };
 
-const DETAIL_COLS = 'id, name, full_name, phone, join_date, address, birth_date, guardian_name, guardian_phone, medical_notes, group_name, notes';
+const DETAIL_COLS = 'id, name, full_name, phone, join_date, address, birth_date, guardian_name, guardian_phone, medical_notes, notes';
 
 app.get('/api/leader/scouts/:id', requireLeader, wrap(async (req, res) => {
   const { rows } = await pool.query(`SELECT ${DETAIL_COLS} FROM scouts WHERE id = $1`, [intId(req.params.id)]);
@@ -247,9 +253,9 @@ app.put('/api/scouts/:id', requireLeader, wrap(async (req, res) => {
   if (!name) throw invalid();
   const r = await pool.query(
     `UPDATE scouts SET name=$1, full_name=$2, phone=$3, join_date=$4, address=$5, birth_date=$6,
-       guardian_name=$7, guardian_phone=$8, medical_notes=$9, group_name=$10, notes=$11 WHERE id=$12`,
-    [name, text(b.full_name, 120), text(b.phone, 40), date(b.join_date), text(b.address, 300), date(b.birth_date),
-     text(b.guardian_name, 120), text(b.guardian_phone, 40), text(b.medical_notes, 1000), text(b.group_name, 60),
+       guardian_name=$7, guardian_phone=$8, medical_notes=$9, notes=$10 WHERE id=$11`,
+    [name, text(b.full_name, 120), phone(b.phone), date(b.join_date), text(b.address, 300), date(b.birth_date),
+     text(b.guardian_name, 120), phone(b.guardian_phone), text(b.medical_notes, 1000),
      text(b.notes, 1000), id]);
   if (!r.rowCount) return bad(res, 'not_found', 404);
   audit(req.leader, 'scout_update', { name });
