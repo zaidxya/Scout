@@ -40,11 +40,17 @@ const date = (v) => {
 const requireLeader = wrap(async (req, res, next) => {
   let p;
   try { p = jwt.verify(req.cookies.token, SECRET); } catch { return bad(res, 'unauthorized', 401); }
-  const { rows } = await pool.query('SELECT id, username FROM leaders WHERE id = $1', [p.id]);
+  const { rows } = await pool.query('SELECT id, username, role FROM leaders WHERE id = $1', [p.id]);
   if (!rows[0]) return bad(res, 'unauthorized', 401); // e.g. leader was deleted
   req.leader = rows[0];
   next();
 });
+// only the super admin and admins may manage leader accounts
+const isAdmin = (l) => l.role === 'super_admin' || l.role === 'admin';
+const requireAdmin = (req, res, next) => (isAdmin(req.leader) ? next() : bad(res, 'forbidden', 403));
+// may `actor` delete / reset the password of `target`? (never the super admin; admins only manage plain leaders)
+const canManage = (actor, target) => target.id !== actor.id && target.role !== 'super_admin'
+  && (actor.role === 'super_admin' || (actor.role === 'admin' && target.role === 'leader'));
 
 // ---- audit log: who did what (never stores passwords or private scout details) ----
 function audit(leader, action, meta) {
@@ -86,7 +92,7 @@ app.post('/api/login', loginLimiter, wrap(async (req, res) => {
   res.cookie('token', token, {
     httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 12 * 60 * 60 * 1000,
   });
-  res.json({ username: leader.username });
+  res.json({ username: leader.username, role: leader.role });
 }));
 
 app.post('/api/logout', wrap(async (req, res) => {
@@ -98,7 +104,7 @@ app.post('/api/logout', wrap(async (req, res) => {
   res.clearCookie('token');
   res.json({ ok: true });
 }));
-app.get('/api/me', requireLeader, (req, res) => res.json({ username: req.leader.username }));
+app.get('/api/me', requireLeader, (req, res) => res.json({ username: req.leader.username, role: req.leader.role }));
 
 app.put('/api/me/password', requireLeader, wrap(async (req, res) => {
   const { current, next } = req.body || {};
@@ -159,7 +165,7 @@ app.get('/api/labels', requireLeader, wrap(async (req, res) => {
   res.json(rows);
 }));
 
-app.post('/api/labels', requireLeader, wrap(async (req, res) => {
+app.post('/api/labels', requireLeader, requireAdmin, wrap(async (req, res) => {
   const kind = req.body?.kind;
   const en = text(req.body?.name_en, 40), ar = text(req.body?.name_ar, 40);
   if (!['role', 'tag'].includes(kind) || (!en && !ar)) throw invalid();
@@ -170,7 +176,7 @@ app.post('/api/labels', requireLeader, wrap(async (req, res) => {
   res.status(201).json(rows[0]);
 }));
 
-app.put('/api/labels/:id', requireLeader, wrap(async (req, res) => {
+app.put('/api/labels/:id', requireLeader, requireAdmin, wrap(async (req, res) => {
   const b = req.body || {}, sets = [], vals = [];
   if ('color' in b) { vals.push(hexColor(b.color)); sets.push(`color = $${vals.length}`); }
   if ('priority' in b) { vals.push(priority(b.priority)); sets.push(`priority = $${vals.length}`); }
@@ -182,7 +188,7 @@ app.put('/api/labels/:id', requireLeader, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-app.delete('/api/labels/:id', requireLeader, wrap(async (req, res) => {
+app.delete('/api/labels/:id', requireLeader, requireAdmin, wrap(async (req, res) => {
   const { rows } = await pool.query('DELETE FROM labels WHERE id = $1 RETURNING name_en, kind', [intId(req.params.id)]);
   if (rows[0]) audit(req.leader, 'label_delete', { name: `${rows[0].name_en} (${rows[0].kind})` });
   res.json({ ok: true });
@@ -322,26 +328,28 @@ app.delete('/api/activities/:id', requireLeader, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-// ---- leader: manage leaders ----
-app.get('/api/leaders', requireLeader, wrap(async (req, res) => {
+// ---- leader: manage leaders (super admin / admin only) ----
+app.get('/api/leaders', requireLeader, requireAdmin, wrap(async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT l.id, l.username, l.created_at, l.scout_id, s.name AS scout_name
-     FROM leaders l LEFT JOIN scouts s ON s.id = l.scout_id ORDER BY l.id`);
-  res.json(rows);
+    `SELECT l.id, l.username, l.role, l.created_at, l.scout_id, s.name AS scout_name
+     FROM leaders l LEFT JOIN scouts s ON s.id = l.scout_id ORDER BY (l.role = 'super_admin') DESC, (l.role = 'admin') DESC, l.id`);
+  res.json(rows.map((r) => ({ ...r, can_manage: canManage(req.leader, r) })));
 }));
 
-app.post('/api/leaders', requireLeader, wrap(async (req, res) => {
+app.post('/api/leaders', requireLeader, requireAdmin, wrap(async (req, res) => {
   const username = String(req.body?.username || '').trim().toLowerCase();
   const password = req.body?.password;
   if (!/^[a-z0-9_.-]{3,40}$/.test(username)) throw invalid();
   if (typeof password !== 'string' || password.length < 8 || password.length > 200) return bad(res, 'weak_password');
+  const role = req.body?.role === 'admin' ? 'admin' : 'leader';
+  if (role === 'admin' && req.leader.role !== 'super_admin') return bad(res, 'forbidden', 403); // only the super admin creates admins
   const display = text(req.body?.display_name, 60) || username;
   try {
     // one statement: creates the leader's scout profile and the leader together (or neither)
     const { rows } = await pool.query(
       `WITH s AS (INSERT INTO scouts (name) VALUES ($3) RETURNING id)
-       INSERT INTO leaders (username, password_hash, scout_id) SELECT $1::text, $2::text, id FROM s RETURNING id, username`,
-      [username, await bcrypt.hash(password, 12), display]);
+       INSERT INTO leaders (username, password_hash, scout_id, role) SELECT $1::text, $2::text, id, $4::text FROM s RETURNING id, username, role`,
+      [username, await bcrypt.hash(password, 12), display, role]);
     audit(req.leader, 'leader_add', { name: rows[0].username });
     res.status(201).json(rows[0]);
   } catch (e) {
@@ -350,15 +358,31 @@ app.post('/api/leaders', requireLeader, wrap(async (req, res) => {
   }
 }));
 
-app.delete('/api/leaders/:id', requireLeader, wrap(async (req, res) => {
+app.delete('/api/leaders/:id', requireLeader, requireAdmin, wrap(async (req, res) => {
   const id = intId(req.params.id);
   if (id === req.leader.id) return bad(res, 'cannot_delete_self', 400);
-  const { rows } = await pool.query('DELETE FROM leaders WHERE id = $1 RETURNING username', [id]);
-  if (rows[0]) audit(req.leader, 'leader_delete', { name: rows[0].username });
+  const t = (await pool.query('SELECT id, username, role FROM leaders WHERE id = $1', [id])).rows[0];
+  if (!t) return res.json({ ok: true });
+  if (!canManage(req.leader, t)) return bad(res, 'forbidden', 403);
+  await pool.query('DELETE FROM leaders WHERE id = $1', [id]);
+  audit(req.leader, 'leader_delete', { name: t.username });
   res.json({ ok: true });
 }));
 
-app.get('/api/audit', requireLeader, wrap(async (req, res) => {
+// reset someone else's password (the super admin's own password can only be changed by the super admin or with reset-password.js)
+app.put('/api/leaders/:id/password', requireLeader, requireAdmin, wrap(async (req, res) => {
+  const id = intId(req.params.id);
+  const password = req.body?.password;
+  if (typeof password !== 'string' || password.length < 8 || password.length > 200) return bad(res, 'weak_password');
+  const t = (await pool.query('SELECT id, username, role FROM leaders WHERE id = $1', [id])).rows[0];
+  if (!t) return bad(res, 'not_found', 404);
+  if (!canManage(req.leader, t)) return bad(res, 'forbidden', 403);
+  await pool.query('UPDATE leaders SET password_hash = $1 WHERE id = $2', [await bcrypt.hash(password, 12), id]);
+  audit(req.leader, 'leader_password_reset', { name: t.username });
+  res.json({ ok: true });
+}));
+
+app.get('/api/audit', requireLeader, requireAdmin, wrap(async (req, res) => {
   const { rows } = await pool.query('SELECT id, leader_name, action, meta, created_at FROM audit_log ORDER BY id DESC LIMIT 300');
   res.json(rows);
 }));
@@ -380,9 +404,19 @@ app.use((err, req, res, next) => {
   const { rows } = await pool.query('SELECT COUNT(*)::int AS n FROM leaders');
   const { LEADER_USERNAME, LEADER_PASSWORD } = process.env;
   if (rows[0].n === 0 && LEADER_USERNAME && LEADER_PASSWORD) {
-    await pool.query('INSERT INTO leaders (username, password_hash) VALUES ($1, $2)',
+    await pool.query("INSERT INTO leaders (username, password_hash, role) VALUES ($1, $2, 'super_admin')",
       [LEADER_USERNAME.trim().toLowerCase(), await bcrypt.hash(LEADER_PASSWORD, 12)]);
-    console.log(`Created first leader "${LEADER_USERNAME}"`);
+    console.log(`Created first leader (super admin) "${LEADER_USERNAME}"`);
+  }
+  // make sure exactly one super admin exists (covers accounts created before roles existed):
+  // the account named in LEADER_USERNAME, otherwise the oldest account
+  const sa = await pool.query("SELECT 1 FROM leaders WHERE role = 'super_admin'");
+  if (!sa.rows[0]) {
+    const r = await pool.query(
+      `UPDATE leaders SET role = 'super_admin' WHERE id = (
+         SELECT id FROM leaders ORDER BY (username = $1) DESC, id LIMIT 1) RETURNING username`,
+      [(LEADER_USERNAME || '').trim().toLowerCase()]);
+    if (r.rows[0]) console.log(`Promoted "${r.rows[0].username}" to super admin`);
   }
   // make sure every leader has a scout profile (covers leaders created before this feature)
   const missing = await pool.query('SELECT id, username FROM leaders WHERE scout_id IS NULL');

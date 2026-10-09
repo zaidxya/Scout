@@ -29,6 +29,24 @@ The header shows the logged-in leader's username next to the "القيادة" ti
 | Tags | no | yes |
 | Full name, phone, join date, date of birth, address, patrol/group, guardian name and phone, medical notes, other notes | no | yes |
 
+## Account levels and password reset
+
+| Level | Can add/delete leaders | Can reset others' passwords |
+|---|---|---|
+| **Super admin** (exactly one: the account created from `LEADER_USERNAME`) | yes, including admins | yes, for admins and leaders |
+| **Admin** (created by the super admin) | leaders only | leaders only |
+| **Leader** | no (the Leaders tab only shows "change my password") | no |
+
+The super admin can't be deleted, and nobody can delete their own account. Every check is enforced on the server, not only hidden in the page.
+Existing databases are upgraded automatically on startup: the `LEADER_USERNAME` account (otherwise the oldest account) becomes the super admin and everyone else stays a leader.
+
+**Resetting a password**
+- A leader or admin who forgot theirs: the super admin (or an admin, for leaders) opens the **Leaders** tab and presses *Reset password* next to the account.
+- The super admin forgot theirs: nobody can reset it from the website. Use `reset-password.js`:
+  1. On your computer, in the project folder with `.env` filled in (same `DATABASE_URL` as the live site), run `node reset-password.js <username> <new-password>` (8+ characters).
+  2. No local setup? Run `node -e "console.log(require('bcryptjs').hashSync('NEW_PASSWORD', 12))"` and in Neon's SQL Editor run `UPDATE leaders SET password_hash = '<that hash>' WHERE username = 'boss';`.
+- Someone already logged in stays logged in for up to 12 hours after a reset; change `JWT_SECRET` on Render to log everyone out at once.
+
 ## Tech
 
 Node.js 18+, Express, PostgreSQL on Neon (`pg`), `morgan` for request logging, plain HTML/CSS/JavaScript on the front end.
@@ -102,7 +120,7 @@ The free Render tier sleeps when idle, so the first visit after a quiet spell ca
 - The XP unit is written "XP" in the Arabic text too.
 - Photos are cropped square, shrunk to 256px in the browser, and stored in the database.
 - Login attempts are limited to 10 per 15 minutes per IP (kept in memory, so it resets on restart).
-- There is no "forgot password" flow yet. Another leader can remove and re-add the account, or you can delete the row in Neon's SQL Editor.
+- **Forgot a password?** See "Account levels and password reset" below.
 - The public page shows children's names and photos to anyone with the link. Consider guardian consent and using first names or nicknames as the display name.
 
 ## Recent changes (handoff notes)

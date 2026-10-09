@@ -34,6 +34,7 @@
         <button id="btn-labels" type="button" role="tab" data-i18n="tab_labels"></button>
         <button id="btn-leaders" type="button" role="tab" data-i18n="tab_leaders"></button>
         <button id="btn-log" type="button" role="tab" data-i18n="tab_log"></button>
+        <button id="btn-password" type="button" role="tab" data-i18n="tab_password"></button>
       </div>
       <p id="toast" class="error" role="status"></p>
 
@@ -97,22 +98,7 @@
         </div>
       </div>
 
-      <div id="tab-leaders" class="hidden">
-        <div class="panel">
-          <h2 data-i18n="leaders_title"></h2>
-          <ul id="leaderList" class="simple-list"></ul>
-          <form id="leaderForm">
-            <h3 data-i18n="add_leader"></h3>
-            <div class="grid2">
-              <label><span data-i18n="username"></span><input name="username" type="text" autocomplete="off" pattern="[A-Za-z0-9_.\-]{3,40}" required></label>
-              <label><span data-i18n="password"></span><input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
-            </div>
-            <p class="hint" data-i18n="pw_hint"></p>
-            <label><span data-i18n="display_name"></span><input name="display_name" type="text" maxlength="60"></label>
-            <p class="hint" data-i18n="display_name_hint"></p>
-            <button class="btn" type="submit" data-i18n="add"></button>
-          </form>
-        </div>
+      <div id="tab-password" class="hidden">
         <form id="pwForm" class="panel">
           <h2 data-i18n="change_password"></h2>
           <div class="grid2">
@@ -122,13 +108,35 @@
           <button class="btn" type="submit" data-i18n="save"></button>
         </form>
       </div>
+
+      <div id="tab-leaders" class="hidden">
+        <div id="leaderPanel" class="panel">
+          <h2 data-i18n="leaders_title"></h2>
+          <ul id="leaderList" class="simple-list"></ul>
+          <form id="leaderForm">
+            <h3 data-i18n="add_leader"></h3>
+            <div class="grid2">
+              <label><span data-i18n="username"></span><input name="username" type="text" autocomplete="off" pattern="[A-Za-z0-9_.\-]{3,40}" required></label>
+              <label><span data-i18n="password"></span><input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
+            </div>
+            <p class="hint" data-i18n="pw_hint"></p>
+            <label id="roleField" class="hidden"><span data-i18n="account_type"></span>
+              <select name="role" style="max-width:12rem"><option value="leader" data-i18n="acct_leader"></option><option value="admin" data-i18n="acct_admin"></option></select></label>
+            <label><span data-i18n="display_name"></span><input name="display_name" type="text" maxlength="60"></label>
+            <p class="hint" data-i18n="display_name_hint"></p>
+            <button class="btn" type="submit" data-i18n="add"></button>
+          </form>
+        </div>
+      </div>
     </div>
   </main>
   <script src="/common.js"></script>
   <script>
     const $ = (id) => document.getElementById(id);
-    let scouts = [], current = null, data = null, det = null, acts = [], labels = [], leaders = [], me = '';
-    const TABS = ['scouts', 'activities', 'labels', 'leaders', 'log'];
+    let scouts = [], current = null, data = null, det = null, acts = [], labels = [], leaders = [], me = '', myRole = 'leader';
+    const isAdmin = () => myRole === 'admin' || myRole === 'super_admin';
+    const TABS = ['scouts', 'activities', 'labels', 'leaders', 'log', 'password'];
+    const ADMIN_TABS = ['labels', 'leaders', 'log']; // only admins see these
 
     const msg = (text, ok) => { $('toast').textContent = text || ''; $('toast').className = 'error' + (ok ? ' ok' : ''); };
     const fail = (e) => { if (e.status === 401 && e.code === 'unauthorized') show(false); msg(errText(e)); };
@@ -140,7 +148,10 @@
       $('meName').textContent = authed && me ? me : '';
       $('meName').style.display = authed && me ? '' : 'none';
     }
+    // hide the admin-only tabs from regular leaders
+    function applyRole() { ADMIN_TABS.forEach((x) => $('btn-' + x).classList.toggle('hidden', !isAdmin())); }
     function showTab(n) {
+      if (ADMIN_TABS.includes(n) && !isAdmin()) n = 'scouts';
       msg('');
       TABS.forEach((x) => {
         $('tab-' + x).classList.toggle('hidden', x !== n);
@@ -149,7 +160,7 @@
       });
       if (n === 'activities') loadActs();
       if (n === 'labels') loadLabels();
-      if (n === 'leaders') loadLeaders();
+      if (n === 'leaders' && isAdmin()) loadLeaders();
       if (n === 'log') loadLog();
     }
     TABS.forEach((x) => $('btn-' + x).addEventListener('click', () => showTab(x)));
@@ -384,19 +395,34 @@
 
     // ---------- leaders ----------
     async function loadLeaders() { try { leaders = await api('/api/leaders'); drawLeaders(); } catch (e) { fail(e); } }
+    const acctName = (r) => t('acct_' + r);
     function drawLeaders() {
-      $('leaderList').replaceChildren(...leaders.map((l) => el('li', {},
-        el('span', { class: 'grow' }, l.username, l.username === me ? ` ${t('you')}` : '',
-          l.scout_name && l.scout_name !== l.username ? el('small', { style: 'display:block;opacity:.7' }, `${t('scout_profile')} ${l.scout_name}`) : ''),
-        l.username === me ? '' : el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
-          if (!(await confirmBox(t('confirm_delete_leader')))) return;
-          try { await api('/api/leaders/' + l.id, 'DELETE'); await loadLeaders(); } catch (e) { fail(e); }
-        } }, t('delete')))));
+      $('roleField').classList.toggle('hidden', myRole !== 'super_admin'); // only the super admin can create admins
+      $('leaderList').replaceChildren(...leaders.map((l) => {
+        const pwRow = el('form', { class: 'row hidden' },
+          el('input', { type: 'password', name: 'password', minlength: '8', required: '', autocomplete: 'new-password', placeholder: t('reset_pw_for'), 'aria-label': t('reset_pw_for') }),
+          el('button', { class: 'btn small', type: 'submit' }, t('save')));
+        pwRow.addEventListener('submit', async (ev) => {
+          ev.preventDefault();
+          try { await api(`/api/leaders/${l.id}/password`, 'PUT', { password: new FormData(pwRow).get('password') }); pwRow.reset(); pwRow.classList.add('hidden'); msg(t('saved'), true); }
+          catch (e) { fail(e); }
+        });
+        return el('li', { class: 'acct' },
+          el('span', { class: 'grow' }, l.username, l.username === me ? ` ${t('you')}` : '', ' ',
+            el('span', { class: 'chip' + (l.role === 'leader' ? '' : ' leader') }, acctName(l.role)),
+            l.scout_name && l.scout_name !== l.username ? el('small', { style: 'display:block;opacity:.7' }, `${t('scout_profile')} ${l.scout_name}`) : ''),
+          l.can_manage ? el('button', { class: 'btn ghost small', type: 'button', onclick: () => { pwRow.classList.toggle('hidden'); pwRow.querySelector('input').focus(); } }, t('reset_password')) : '',
+          l.can_manage ? el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
+            if (!(await confirmBox(t(l.role === 'admin' ? 'confirm_delete_admin' : 'confirm_delete_leader')))) return;
+            try { await api('/api/leaders/' + l.id, 'DELETE'); await loadLeaders(); } catch (e) { fail(e); }
+          } }, t('delete')) : '',
+          pwRow);
+      }));
     }
     $('leaderForm').addEventListener('submit', async (ev) => {
       ev.preventDefault();
       const f = new FormData(ev.target);
-      try { await api('/api/leaders', 'POST', { username: f.get('username'), password: f.get('password'), display_name: f.get('display_name') }); ev.target.reset(); msg(t('saved'), true); await loadLeaders(); await loadScouts(); }
+      try { await api('/api/leaders', 'POST', { username: f.get('username'), password: f.get('password'), display_name: f.get('display_name'), role: f.get('role') || 'leader' }); ev.target.reset(); msg(t('saved'), true); await loadLeaders(); await loadScouts(); }
       catch (e) { fail(e); }
     });
     $('pwForm').addEventListener('submit', async (ev) => {
@@ -407,8 +433,8 @@
     });
 
     // ---------- login / boot ----------
-    async function enter(username) {
-      me = username; show(true); showTab('scouts');
+    async function enter(username, role) {
+      me = username; myRole = role || 'leader'; show(true); applyRole(); showTab('scouts'); drawLeaders();
       try { [acts, labels] = await Promise.all([api('/api/activities'), api('/api/labels')]); await loadScouts(); } catch (e) { fail(e); }
       drawDetail();
     }
@@ -417,7 +443,7 @@
       const f = new FormData(ev.target);
       try {
         const r = await api('/api/login', 'POST', { username: f.get('username'), password: f.get('password') });
-        $('loginErr').textContent = ''; ev.target.reset(); await enter(r.username);
+        $('loginErr').textContent = ''; ev.target.reset(); await enter(r.username, r.role);
       } catch (e) { $('loginErr').textContent = errText(e); }
     });
     $('logoutBtn').addEventListener('click', async () => { await api('/api/logout', 'POST'); data = det = null; current = null; show(false); });
@@ -429,7 +455,7 @@
 
     (async () => {
       await initLang();
-      try { const r = await api('/api/me'); await enter(r.username); } catch { show(false); }
+      try { const r = await api('/api/me'); await enter(r.username, r.role); } catch { show(false); }
     })();
   </script>
 </body>

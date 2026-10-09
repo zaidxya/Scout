@@ -75,6 +75,7 @@
   "err_cannot_delete_self": "You can't remove your own account.",
   "err_server": "Something went wrong on the server.",
   "tab_log": "Activity log",
+  "tab_password": "Change password",
   "log_title": "Leader activity (latest 300)",
   "log_empty": "Nothing recorded yet.",
   "audit_login": "logged in",
@@ -126,5 +127,15 @@
   "priority": "Priority",
   "priority_hint": "Roles only. A higher number is listed first in the scout list (0 = no priority). A scout with several roles uses the highest one; ties are ordered by XP.",
   "title_dashboard": "Jawlat",
-  "title_leader": "Jawlat"
+  "title_leader": "Jawlat",
+  "acct_super_admin": "Super admin",
+  "acct_admin": "Admin",
+  "acct_leader": "Leader",
+  "account_type": "Account type",
+  "reset_password": "Reset password",
+  "reset_pw_for": "New password for this account",
+  "err_forbidden": "You don't have permission to do that.",
+  "audit_leader_password_reset": "reset the password of",
+  "confirm_delete_admin": "Remove this admin? They will be logged out. Their scout profile stays in the list.",
+  "admin_only_hint": "Only the super admin can create admins. Admins can add and remove regular leaders."
 }

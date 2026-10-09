@@ -159,6 +159,9 @@ label input, label select, label textarea { margin-top: .2rem; }
 .simple-list { list-style: none; margin: 0 0 1.25rem; padding: 0; }
 .simple-list li { display: flex; align-items: center; gap: .75rem; padding: .55rem 0; border-bottom: 1px solid var(--line); }
 .simple-list .grow { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.simple-list li.acct { flex-wrap: wrap; }
+.simple-list li.acct > .grow { flex: 1 1 10rem; }
+.simple-list li.acct > form { flex: 1 1 100%; margin: 0 0 .25rem; }
 .hidden { display: none !important; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 

@@ -71,3 +71,12 @@ ALTER TABLE leaders ADD COLUMN IF NOT EXISTS scout_id INT REFERENCES scouts(id) 
 
 ALTER TABLE labels ADD COLUMN IF NOT EXISTS color TEXT;
 ALTER TABLE labels ADD COLUMN IF NOT EXISTS priority INT NOT NULL DEFAULT 0;
+
+-- account levels: super_admin (exactly one), admin, leader. Only super_admin/admin may add or remove leaders.
+ALTER TABLE leaders ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'leader';
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'leaders_role_check') THEN
+    ALTER TABLE leaders ADD CONSTRAINT leaders_role_check CHECK (role IN ('super_admin', 'admin', 'leader'));
+  END IF;
+END $$;
+CREATE UNIQUE INDEX IF NOT EXISTS leaders_one_super_admin ON leaders ((true)) WHERE role = 'super_admin';
