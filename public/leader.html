@@ -149,6 +149,7 @@
       TABS.forEach((x) => {
         $('tab-' + x).classList.toggle('hidden', x !== n);
         $('btn-' + x).setAttribute('aria-selected', String(x === n));
+        if (x === n) $('btn-' + x).scrollIntoView({ block: 'nearest', inline: 'nearest' });
       });
       if (n === 'activities') loadActs();
       if (n === 'labels') loadLabels();
@@ -184,18 +185,19 @@
     function drawList() {
       const q = norm($('q').value.trim()), fr = Number($('fRole').value), ft = Number($('fTag').value);
       const shown = scouts.filter((s) => matches(s, q) && (!fr || s.label_ids.includes(fr)) && (!ft || s.label_ids.includes(ft)));
-      renderScoutList($('list'), shown, current, openScout,
+      renderScoutList($('list'), shown, current, (id) => openScout(id),
         (s) => el('span', { class: 'sub' }, chips(s.label_ids)),
         scouts.length ? 'no_results' : 'no_scouts');
     }
     ['q', 'fRole', 'fTag'].forEach((id) => $(id).addEventListener('input', drawList));
 
-    async function openScout(id) {
+    async function openScout(id, scrollNext = true) {
       current = id; drawList();
       try {
         [data, det] = await Promise.all([api('/api/scouts/' + id), api('/api/leader/scouts/' + id), loadActsQuiet()]);
       } catch (e) { data = det = null; fail(e); }
       drawDetail();
+      if (scrollNext && matchMedia('(max-width: 760px)').matches) $('right').scrollIntoView({ block: 'start', behavior: 'smooth' });
     }
     async function loadActsQuiet() { if (!acts.length) acts = await api('/api/activities'); }
 
@@ -225,7 +227,7 @@
       const box = $('right');
       box.replaceChildren();
       if (!data || !det) return box.append(el('p', { class: 'empty' }, t('select_scout')));
-      const refresh = async () => { await loadScouts(); await openScout(data.id); };
+      const refresh = async () => { await loadScouts(); await openScout(data.id, false); };
 
       // award XP from the activity list
       const sel = el('select', { name: 'activity_id', required: '', 'aria-label': t('activity_select') },

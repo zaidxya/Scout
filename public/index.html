@@ -45,6 +45,7 @@
       drawList();
       try { data = await api('/api/scouts/' + id); } catch { data = null; }
       drawDetail();
+      if (matchMedia('(max-width: 760px)').matches) detailEl.scrollIntoView({ block: 'start', behavior: 'smooth' });
     }
     search.addEventListener('input', drawList);
     document.addEventListener('langchange', () => { drawList(); drawDetail(); });

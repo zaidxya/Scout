@@ -107,3 +107,10 @@ The English labels were left as they were (for example "Dashboard" and "Leader a
 ## Round 7: negative totals in red
 - A scout whose total XP is below zero shows it in red: the number in the list (public and leader) and the round badge on their page.
 - Changed: `common.js`, `style.css`.
+
+## Mobile fixes
+- Leader tabs: the five tabs now scroll sideways inside their own row (they used to widen the whole page and overlap the header); the active tab scrolls into view.
+- Single-column layout uses `minmax(0, 1fr)` so the filter dropdowns can't force a horizontal scroll at 320px.
+- Tapping a scout on a phone scrolls to their details (dashboard and leader area).
+- XP numbers and the "-5" signs are bidi-isolated so negatives no longer render as "XP 5-" in RTL.
+- Phone sizing: compact detail header (avatar / name / XP badge on one row), larger tap targets (buttons, selects, chip remove, colour swatch), wrapping rows in roles/activities/leaders lists, date inputs normalised for iOS.
