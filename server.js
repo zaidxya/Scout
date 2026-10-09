@@ -309,7 +309,7 @@ app.get('/api/activities', requireLeader, wrap(async (req, res) => {
 app.post('/api/activities', requireLeader, wrap(async (req, res) => {
   const en = text(req.body?.name_en, 60), ar = text(req.body?.name_ar, 60);
   const xp = Number(req.body?.xp);
-  if ((!en && !ar) || !Number.isInteger(xp) || xp < 1 || xp > 10000) throw invalid();
+  if ((!en && !ar) || !Number.isInteger(xp) || xp === 0 || xp < -10000 || xp > 10000) throw invalid();
   const { rows } = await pool.query(
     'INSERT INTO activities (name_en, name_ar, xp) VALUES ($1, $2, $3) RETURNING id', [en || ar, ar || en, xp]);
   audit(req.leader, 'activity_add', { name_en: en || ar, name_ar: ar || en, xp });

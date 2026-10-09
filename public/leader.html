@@ -67,7 +67,7 @@
               <label><span data-i18n="name_en"></span><input name="name_en" type="text" maxlength="60"></label>
               <label><span data-i18n="name_ar"></span><input name="name_ar" type="text" maxlength="60" dir="rtl"></label>
             </div>
-            <label><span data-i18n="xp_value"></span><input name="xp" type="number" min="1" max="10000" step="1" required style="max-width:10rem"></label>
+            <label><span data-i18n="xp_value"></span><input name="xp" type="number" min="-10000" max="10000" step="1" required style="max-width:10rem"></label>
             <button class="btn" type="submit" data-i18n="add"></button>
           </form>
         </div>
@@ -230,7 +230,7 @@
       // award XP from the activity list
       const sel = el('select', { name: 'activity_id', required: '', 'aria-label': t('activity_select') },
         el('option', { value: '' }, t('activity_select')),
-        acts.map((a) => el('option', { value: a.id }, `${state.lang === 'ar' ? a.name_ar : a.name_en} (+${fmt(a.xp)} ${t('xp')})`)));
+        acts.map((a) => el('option', { value: a.id }, `${state.lang === 'ar' ? a.name_ar : a.name_en} (${signed(a.xp)} ${t('xp')})`)));
       const awardForm = el('form', { class: 'panel' },
         el('h2', {}, t('award_xp')),
         el('label', {}, t('activity_select'), sel),
@@ -327,7 +327,7 @@
     function drawActs() {
       $('actList').replaceChildren(...acts.map((a) => el('li', {},
         el('span', { class: 'grow' }, state.lang === 'ar' ? a.name_ar : a.name_en),
-        el('b', {}, `+${fmt(a.xp)} ${t('xp')}`),
+        el('b', { style: a.xp < 0 ? 'color:var(--danger)' : '' }, `${signed(a.xp)} ${t('xp')}`),
         el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
           if (!(await confirmBox(t('confirm_delete_activity')))) return;
           try { await api('/api/activities/' + a.id, 'DELETE'); await loadActs(); } catch (e) { fail(e); }
@@ -348,9 +348,9 @@
       const act = ar ? m.activity_ar : m.activity_en;
       const verb = t('audit_' + r.action);
       switch (r.action) {
-        case 'xp_award': return `${verb} +${fmt(m.xp)} ${t('xp')} (${act}) ${t('audit_to')} ${m.name}`;
-        case 'xp_undo': return `${verb} +${fmt(m.xp)} ${t('xp')} (${act}) ${t('audit_from')} ${m.name}`;
-        case 'activity_add': return `${verb} ${ar ? m.name_ar : m.name_en} (+${fmt(m.xp)} ${t('xp')})`;
+        case 'xp_award': return `${verb} ${signed(m.xp)} ${t('xp')} (${act}) ${t('audit_to')} ${m.name}`;
+        case 'xp_undo': return `${verb} ${signed(m.xp)} ${t('xp')} (${act}) ${t('audit_from')} ${m.name}`;
+        case 'activity_add': return `${verb} ${ar ? m.name_ar : m.name_en} (${signed(m.xp)} ${t('xp')})`;
         case 'activity_delete': return `${verb} ${ar ? m.name_ar : m.name_en}`;
         case 'login': case 'logout': case 'password_change': return verb;
         default: return `${verb} ${m.name || ''}`;

@@ -15,7 +15,7 @@ English and Arabic are built in, and the look follows the Jawlat logo (burgundy 
 - **Search and filter**: the scout list has a search box (name, full name, phone, group, role and tag names in both languages; Arabic spelling variants and diacritics are ignored) plus role and tag filters
 - **Roles & tags tab**: create colored roles with a priority (higher priority = listed first, for everyone) (e.g. Patrol leader) and tags (e.g. First aid) with English and Arabic names. Assign them from a scout's page. Roles are shown on the public dashboard (and searchable there); tags are visible to leaders only
 - **Scouts**: add and delete scouts, award XP from the activity list (with an optional note), undo a mistaken entry, upload a profile picture, edit details
-- **Activities**: manage the activity list. Starter list: Presence +5, Idea +3, Event +10, each with an English and an Arabic name
+- **Activities**: manage the activity list. Starter list: Presence +5, Idea +3, Event +10, each with an English and an Arabic name. Use a negative value (for example -5) for activities that deduct XP
 - **Leaders**: add or remove leaders, change your own password
 - **Activity log (سجل النشاط)**: the latest 300 leader actions (logins, scout changes, XP awarded or undone, activity and leader changes), newest first
 

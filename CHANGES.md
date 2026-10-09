@@ -98,3 +98,12 @@ The English labels were left as they were (for example "Dashboard" and "Leader a
 
 ## Round 6: page titles
 - The browser tab title is now "قائمة الكشاف" on the dashboard and "القيادة" in the leader area (Arabic). English titles are unchanged ("Jawlat"). Each page sets its title key with `data-title` on its `<html>` tag.
+
+## Round 6: negative XP activities
+- Activities can now have a negative XP value (any whole number from -10000 to 10000 except 0). Awarding one deducts XP and shows in red in the history, the activity list and the dropdown.
+- A scout's total is still the sum of their history, so a deduction can be undone like any award. Totals are not floored at zero, so a scout can go below 0.
+- Changed: `server.js` (validation), `leader.html`, `common.js` (`signed()` helper), `style.css`, both i18n files.
+
+## Round 7: negative totals in red
+- A scout whose total XP is below zero shows it in red: the number in the list (public and leader) and the round badge on their page.
+- Changed: `common.js`, `style.css`.

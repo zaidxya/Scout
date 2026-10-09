@@ -48,6 +48,8 @@ const locale = () => (state.lang === 'ar' ? 'ar-EG' : 'en');
 const fmt = (n) => Number(n).toLocaleString(locale());
 const fmtDate = (d) => new Date(d).toLocaleDateString(locale(), { year: 'numeric', month: 'short', day: 'numeric' });
 const errText = (e) => t('err_' + (e.code || 'server'));
+// +5 / -5 (a minus sign for losses, a plus sign for gains)
+const signed = (n) => (n > 0 ? '+' : '') + fmt(n);
 const roleName = (r) => (state.lang === 'ar' ? r.name_ar : r.name_en);
 // chosen color as background, with white or dark text depending on how light it is
 function chipStyle(l) {
@@ -81,7 +83,7 @@ function renderScoutList(ul, scouts, selectedId, onSelect, extra, emptyKey = 'no
     ul.append(
       el('li', {},
         el('button', { type: 'button', 'aria-current': String(s.id === selectedId), onclick: () => onSelect(s.id) },
-          avatar(s), el('span', { class: 'nm' }, s.name, extra ? extra(s) : ''), el('span', { class: 'xp' }, `${fmt(s.total_xp)} ${t('xp')}`)))
+          avatar(s), el('span', { class: 'nm' }, s.name, extra ? extra(s) : ''), el('span', { class: 'xp' + (s.total_xp < 0 ? ' neg' : '') }, `${fmt(s.total_xp)} ${t('xp')}`)))
     )
   );
 }
@@ -92,7 +94,7 @@ function renderDetailHead(scout, showRoles = true) {
     avatar(scout, true),
     hasRoles ? el('div', { style: 'flex:1;min-width:8rem' }, el('h2', { style: 'margin-bottom:.35rem' }, scout.name), roleChips(scout.roles))
              : el('h2', {}, scout.name),
-    el('div', { class: 'badge' }, el('b', {}, fmt(scout.total_xp)), el('span', {}, t('xp'))));
+    el('div', { class: 'badge' + (scout.total_xp < 0 ? ' neg' : '') }, el('b', {}, fmt(scout.total_xp)), el('span', {}, t('xp'))));
 }
 
 function renderLog(scout, onUndo) {
@@ -103,7 +105,7 @@ function renderLog(scout, onUndo) {
     ul.append(
       el('li', {},
         el('div', { class: 'what' }, actName(r), el('small', {}, fmtDate(r.created_at) + (r.note ? ` — ${r.note}` : ''))),
-        el('span', { class: 'gain' }, `+${fmt(r.xp)}`),
+        el('span', { class: 'gain' + (r.xp < 0 ? ' neg' : '') }, signed(r.xp)),
         onUndo ? el('button', { class: 'btn quiet small', type: 'button', onclick: () => onUndo(r.id) }, t('undo')) : ''))
   );
   wrap.append(ul);

@@ -189,3 +189,6 @@ dialog.confirm .btn.danger:hover { background: #8f1d17; }
 input.swatch { width: 2.6rem; height: 2rem; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: #fff; cursor: pointer; }
 .chip.role, .chip.tag { white-space: nowrap; }
 input.prio { width: 4.5rem; padding: .25rem .4rem; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+.log .gain.neg { color: var(--danger); }
+.scout-list .xp.neg { color: var(--danger); }
+.badge.neg { background: var(--danger); color: #fff; box-shadow: 0 0 0 4px var(--paper), 0 0 0 6px var(--danger); }
