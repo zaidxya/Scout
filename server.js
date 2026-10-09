@@ -20,7 +20,9 @@ app.set('trust proxy', 1);
 app.use(morgan('combined', { skip: (req) => /\.(js|css|png|jpe?g|ico|svg|json|woff2?)$/i.test(req.path) || /\/photo$/.test(req.path) }));
 app.use(express.json({ limit: '600kb' }));
 app.use(cookieParser());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), {
+  setHeaders: (res, file) => { if (/\.(html|js|css|json)$/i.test(file)) res.setHeader('Cache-Control', 'no-cache'); },
+}));
 
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const bad = (res, code = 'invalid_input', status = 400) => res.status(status).json({ error: code });
@@ -51,6 +53,13 @@ function audit(leader, action, meta) {
     .catch((e) => console.error('audit failed:', e.message));
 }
 const scoutName = async (id) => (await pool.query('SELECT name FROM scouts WHERE id = $1', [id])).rows[0]?.name || null;
+
+async function tx(fn) {
+  const c = await pool.connect();
+  try { await c.query('BEGIN'); const r = await fn(c); await c.query('COMMIT'); return r; }
+  catch (e) { await c.query('ROLLBACK').catch(() => {}); throw e; }
+  finally { c.release(); }
+}
 
 const attempts = new Map();
 function loginLimiter(req, res, next) {
@@ -101,19 +110,24 @@ app.put('/api/me/password', requireLeader, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-// ---- public: dashboard data (display name, photo, XP, activity only) ----
+// roles are public (tags stay leader-only); used by the public list and detail queries (alias s = scouts)
+const ROLES_JSON = `COALESCE((SELECT json_agg(json_build_object('id', l.id, 'name_en', l.name_en, 'name_ar', l.name_ar, 'color', l.color)
+    ORDER BY l.priority DESC, l.name_en)
+  FROM scout_labels sl JOIN labels l ON l.id = sl.label_id AND l.kind = 'role' WHERE sl.scout_id = s.id), '[]'::json) AS roles`;
+
+// ---- public: dashboard data (display name, photo, roles, XP, activity) ----
 app.get('/api/scouts', wrap(async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT s.id, s.name, s.photo_v, (s.photo IS NOT NULL) AS has_photo, COALESCE(SUM(x.xp), 0)::int AS total_xp
+    `SELECT s.id, s.name, s.photo_v, (s.photo IS NOT NULL) AS has_photo, COALESCE(SUM(x.xp), 0)::int AS total_xp, ${ROLES_JSON}
      FROM scouts s LEFT JOIN xp_log x ON x.scout_id = s.id
-     GROUP BY s.id ORDER BY total_xp DESC, s.name`
+     GROUP BY s.id ORDER BY (SELECT COALESCE(MAX(l.priority), 0) FROM scout_labels sl JOIN labels l ON l.id = sl.label_id AND l.kind = 'role' WHERE sl.scout_id = s.id) DESC, total_xp DESC, s.name`
   );
   res.json(rows);
 }));
 
 app.get('/api/scouts/:id', wrap(async (req, res) => {
   const id = intId(req.params.id);
-  const s = await pool.query('SELECT id, name, photo_v, (photo IS NOT NULL) AS has_photo FROM scouts WHERE id = $1', [id]);
+  const s = await pool.query(`SELECT s.id, s.name, s.photo_v, (s.photo IS NOT NULL) AS has_photo, ${ROLES_JSON} FROM scouts s WHERE s.id = $1`, [id]);
   if (!s.rows[0]) return bad(res, 'not_found', 404);
   const log = await pool.query(
     'SELECT id, activity, activity_ar, xp, note, created_at FROM xp_log WHERE scout_id = $1 ORDER BY created_at DESC, id DESC', [id]);
@@ -127,6 +141,83 @@ app.get('/api/scouts/:id/photo', wrap(async (req, res) => {
 }));
 
 // ---- leader: scouts ----
+// searchable list for leaders: includes private search fields, leader flag and role/tag ids
+app.get('/api/leader/scouts', requireLeader, wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    `SELECT s.id, s.name, s.photo_v, (s.photo IS NOT NULL) AS has_photo, s.full_name, s.phone, s.group_name,
+       COALESCE(x.total, 0)::int AS total_xp,
+       EXISTS (SELECT 1 FROM leaders l WHERE l.scout_id = s.id) AS is_leader,
+       COALESCE((SELECT json_agg(sl.label_id) FROM scout_labels sl WHERE sl.scout_id = s.id), '[]'::json) AS label_ids
+     FROM scouts s LEFT JOIN (SELECT scout_id, SUM(xp) AS total FROM xp_log GROUP BY scout_id) x ON x.scout_id = s.id
+     ORDER BY (SELECT COALESCE(MAX(l.priority), 0) FROM scout_labels sl JOIN labels l ON l.id = sl.label_id AND l.kind = 'role' WHERE sl.scout_id = s.id) DESC, total_xp DESC, s.name`);
+  res.json(rows);
+}));
+
+// ---- leader: roles and tags ----
+app.get('/api/labels', requireLeader, wrap(async (req, res) => {
+  const { rows } = await pool.query('SELECT id, kind, name_en, name_ar, color, priority FROM labels ORDER BY kind, priority DESC, name_en, id');
+  res.json(rows);
+}));
+
+app.post('/api/labels', requireLeader, wrap(async (req, res) => {
+  const kind = req.body?.kind;
+  const en = text(req.body?.name_en, 40), ar = text(req.body?.name_ar, 40);
+  if (!['role', 'tag'].includes(kind) || (!en && !ar)) throw invalid();
+  const { rows } = await pool.query(
+    'INSERT INTO labels (kind, name_en, name_ar, color, priority) VALUES ($1,$2,$3,$4,$5) RETURNING id, kind, name_en, name_ar, color, priority',
+    [kind, en || ar, ar || en, hexColor(req.body?.color), kind === 'role' ? priority(req.body?.priority) : 0]);
+  audit(req.leader, 'label_add', { name: `${en || ar} (${kind})` });
+  res.status(201).json(rows[0]);
+}));
+
+app.put('/api/labels/:id', requireLeader, wrap(async (req, res) => {
+  const b = req.body || {}, sets = [], vals = [];
+  if ('color' in b) { vals.push(hexColor(b.color)); sets.push(`color = $${vals.length}`); }
+  if ('priority' in b) { vals.push(priority(b.priority)); sets.push(`priority = $${vals.length}`); }
+  if (!sets.length) throw invalid();
+  vals.push(intId(req.params.id));
+  const { rows } = await pool.query(`UPDATE labels SET ${sets.join(', ')} WHERE id = $${vals.length} RETURNING name_en, kind`, vals);
+  if (!rows[0]) return bad(res, 'not_found', 404);
+  audit(req.leader, 'label_update', { name: `${rows[0].name_en} (${rows[0].kind})` });
+  res.json({ ok: true });
+}));
+
+app.delete('/api/labels/:id', requireLeader, wrap(async (req, res) => {
+  const { rows } = await pool.query('DELETE FROM labels WHERE id = $1 RETURNING name_en, kind', [intId(req.params.id)]);
+  if (rows[0]) audit(req.leader, 'label_delete', { name: `${rows[0].name_en} (${rows[0].kind})` });
+  res.json({ ok: true });
+}));
+
+// replace the full set of roles/tags of one scout
+app.put('/api/scouts/:id/labels', requireLeader, wrap(async (req, res) => {
+  const id = intId(req.params.id);
+  const ids = req.body?.label_ids;
+  if (!Array.isArray(ids) || ids.length > 100) throw invalid();
+  const labelIds = [...new Set(ids.map(intId))];
+  const name = await scoutName(id);
+  if (!name) return bad(res, 'not_found', 404);
+  await tx(async (c) => {
+    await c.query('DELETE FROM scout_labels WHERE scout_id = $1', [id]);
+    if (labelIds.length) await c.query(
+      'INSERT INTO scout_labels (scout_id, label_id) SELECT $1::int, id FROM labels WHERE id = ANY($2::int[])', [id, labelIds]);
+  });
+  audit(req.leader, 'labels_set', { name });
+  res.json({ ok: true });
+}));
+
+// role priority: whole number 0-1000, higher is listed first (empty = 0)
+const priority = (v) => {
+  const n = v === '' || v == null ? 0 : Number(v);
+  if (!Number.isInteger(n) || n < 0 || n > 1000) throw invalid();
+  return n;
+};
+const hexColor = (v) => {
+  const s = String(v ?? '').trim();
+  if (!s) return null;
+  if (!/^#[0-9a-fA-F]{6}$/.test(s)) throw invalid();
+  return s.toLowerCase();
+};
+
 const DETAIL_COLS = 'id, name, full_name, phone, join_date, address, birth_date, guardian_name, guardian_phone, medical_notes, group_name, notes';
 
 app.get('/api/leader/scouts/:id', requireLeader, wrap(async (req, res) => {
@@ -161,6 +252,7 @@ app.put('/api/scouts/:id', requireLeader, wrap(async (req, res) => {
 
 app.delete('/api/scouts/:id', requireLeader, wrap(async (req, res) => {
   const id = intId(req.params.id);
+  if ((await pool.query('SELECT 1 FROM leaders WHERE scout_id = $1', [id])).rows[0]) return bad(res, 'scout_is_leader', 409);
   const name = await scoutName(id);
   await pool.query('DELETE FROM scouts WHERE id = $1', [id]);
   if (name) audit(req.leader, 'scout_delete', { name });
@@ -232,7 +324,9 @@ app.delete('/api/activities/:id', requireLeader, wrap(async (req, res) => {
 
 // ---- leader: manage leaders ----
 app.get('/api/leaders', requireLeader, wrap(async (req, res) => {
-  const { rows } = await pool.query('SELECT id, username, created_at FROM leaders ORDER BY id');
+  const { rows } = await pool.query(
+    `SELECT l.id, l.username, l.created_at, l.scout_id, s.name AS scout_name
+     FROM leaders l LEFT JOIN scouts s ON s.id = l.scout_id ORDER BY l.id`);
   res.json(rows);
 }));
 
@@ -241,9 +335,13 @@ app.post('/api/leaders', requireLeader, wrap(async (req, res) => {
   const password = req.body?.password;
   if (!/^[a-z0-9_.-]{3,40}$/.test(username)) throw invalid();
   if (typeof password !== 'string' || password.length < 8 || password.length > 200) return bad(res, 'weak_password');
+  const display = text(req.body?.display_name, 60) || username;
   try {
+    // one statement: creates the leader's scout profile and the leader together (or neither)
     const { rows } = await pool.query(
-      'INSERT INTO leaders (username, password_hash) VALUES ($1, $2) RETURNING id, username', [username, await bcrypt.hash(password, 12)]);
+      `WITH s AS (INSERT INTO scouts (name) VALUES ($3) RETURNING id)
+       INSERT INTO leaders (username, password_hash, scout_id) SELECT $1::text, $2::text, id FROM s RETURNING id, username`,
+      [username, await bcrypt.hash(password, 12), display]);
     audit(req.leader, 'leader_add', { name: rows[0].username });
     res.status(201).json(rows[0]);
   } catch (e) {
@@ -285,6 +383,14 @@ app.use((err, req, res, next) => {
     await pool.query('INSERT INTO leaders (username, password_hash) VALUES ($1, $2)',
       [LEADER_USERNAME.trim().toLowerCase(), await bcrypt.hash(LEADER_PASSWORD, 12)]);
     console.log(`Created first leader "${LEADER_USERNAME}"`);
+  }
+  // make sure every leader has a scout profile (covers leaders created before this feature)
+  const missing = await pool.query('SELECT id, username FROM leaders WHERE scout_id IS NULL');
+  for (const l of missing.rows) {
+    await pool.query(
+      'WITH s AS (INSERT INTO scouts (name) VALUES ($2) RETURNING id) UPDATE leaders SET scout_id = (SELECT id FROM s) WHERE id = $1',
+      [l.id, l.username]);
+    console.log(`Created scout profile for leader "${l.username}"`);
   }
   const port = process.env.PORT || 3000;
   app.listen(port, () => console.log(`Listening on ${port}`));

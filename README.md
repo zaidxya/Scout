@@ -1,39 +1,47 @@
 # Jawlat Scout Tracker (جولات)
 
 A small website for tracking scouts' activity. Leaders award XP for activities; everyone can see a public dashboard.
-English and Arabic (with right-to-left layout) are built in, and the look follows the Jawlat logo (burgundy and sand).
+English and Arabic are built in, and the look follows the Jawlat logo (burgundy and sand). **Arabic is the default language, and the layout stays right-to-left in both languages** (switching language only changes the text).
 
 ## What it does
 
 **Public dashboard (`/`)**: no login needed
-- Searchable list of scouts, ranked by XP
-- Per scout: display name, profile picture, XP total and activity history
+- Searchable list of scouts, ordered by role priority (see below), then XP
+- Per scout: display name, profile picture, roles (colored chips), XP total and activity history
+
+**Leaders are scouts too**: every leader account has its own scout profile that appears in the public list, earns XP and can have roles and tags like any scout. Adding a leader creates the profile (optional display name, defaults to the username). Existing leaders get a profile automatically on the next startup. Removing a leader keeps their scout profile; a leader's profile can't be deleted while the leader exists.
 
 **Leader area (`/leader.html`)**: password protected
+- **Search and filter**: the scout list has a search box (name, full name, phone, group, role and tag names in both languages; Arabic spelling variants and diacritics are ignored) plus role and tag filters
+- **Roles & tags tab**: create colored roles with a priority (higher priority = listed first, for everyone) (e.g. Patrol leader) and tags (e.g. First aid) with English and Arabic names. Assign them from a scout's page. Roles are shown on the public dashboard (and searchable there); tags are visible to leaders only
 - **Scouts**: add and delete scouts, award XP from the activity list (with an optional note), undo a mistaken entry, upload a profile picture, edit details
 - **Activities**: manage the activity list. Starter list: Presence +5, Idea +3, Event +10, each with an English and an Arabic name
 - **Leaders**: add or remove leaders, change your own password
+- **Activity log (سجل النشاط)**: the latest 300 leader actions (logins, scout changes, XP awarded or undone, activity and leader changes), newest first
+
+The header shows the logged-in leader's username next to the "القيادة" title. Delete and undo actions ask for confirmation in a styled popup (not the browser's default box).
 
 **Who sees what**
 
 | Data | Public | Leaders |
 |---|---|---|
-| Display name, profile picture, XP, activity history | yes | yes |
+| Display name, profile picture, roles, XP, activity history | yes | yes |
+| Tags | no | yes |
 | Full name, phone, join date, date of birth, address, patrol/group, guardian name and phone, medical notes, other notes | no | yes |
 
 ## Tech
 
-Node.js 18+, Express, PostgreSQL on Neon (`pg`), plain HTML/CSS/JavaScript on the front end.
+Node.js 18+, Express, PostgreSQL on Neon (`pg`), `morgan` for request logging, plain HTML/CSS/JavaScript on the front end.
 Neon is Postgres, not SQLite, which is why the app uses `pg`. Passwords are hashed with bcrypt; login uses a 12-hour httpOnly cookie.
 
 ```
-server.js        Express app and all API routes
+server.js        Express app, all API routes, audit logging, morgan request logs
 db.js            Postgres connection (Neon)
 schema.sql       Tables; applied automatically on every startup
 public/
   index.html     Public dashboard
   leader.html    Leader area (scouts / activities / leaders tabs)
-  common.js      Language switching, API helper, shared rendering
+  common.js      Language switching, API helper, shared rendering, confirmBox() popup
   style.css      Theme (colors are CSS variables at the top)
   i18n/          en.json and ar.json: all interface text
   logo.jpg, favicon.png
@@ -68,23 +76,49 @@ The free Render tier sleeps when idle, so the first visit after a quiet spell ca
 
 ## API summary
 
-- **Public:** `GET /api/scouts`, `GET /api/scouts/:id`, `GET /api/scouts/:id/photo`
+- **Public:** `GET /api/scouts`, `GET /api/scouts/:id` (both include the scout's roles, never tags), `GET /api/scouts/:id/photo`
 - **Auth:** `POST /api/login`, `POST /api/logout`, `GET /api/me`, `PUT /api/me/password`
 - **Leader only:**
   - Scouts: `POST /api/scouts`, `PUT /api/scouts/:id`, `DELETE /api/scouts/:id`, `GET /api/leader/scouts/:id` (private details), `PUT` and `DELETE /api/scouts/:id/photo`
   - XP: `POST /api/scouts/:id/xp`, `DELETE /api/xp/:id`
   - Activities: `GET`, `POST`, `DELETE /api/activities[/:id]`
   - Leaders: `GET`, `POST`, `DELETE /api/leaders[/:id]`
+  - Search list: `GET /api/leader/scouts` (private search fields, leader flag, role/tag ids)
+  - Roles and tags: `GET`, `POST`, `PUT` (color, priority), `DELETE /api/labels[/:id]`, `PUT /api/scouts/:id/labels` (replaces a scout's full set)
+  - Activity log: `GET /api/audit` (latest 300 entries)
+
+## Logs and usage tracking
+
+- **Render dashboard:** open the service, then the **Logs** tab for app output, and the **Metrics** tab for CPU, memory, request counts and latency.
+- **Request logs:** `morgan` prints one line per page and API request (skipping images, CSS/JS and photos), so they appear in Render's Logs tab even on the free tier. Render's own per-request HTTP logs need a paid workspace. Failed logins are logged with the username tried and the IP.
+- **Leader activity log:** stored in the `audit_log` table (leader username, action, scout or activity name, time). It never stores passwords or private scout details. If a leader is deleted, their past entries stay, with their username.
+- **Not added yet:** visitor analytics for the public page. Privacy-friendly options are Plausible, Umami, GoatCounter or Cloudflare Web Analytics (one script tag in `index.html`). Scouts have no logins, so per-user tracking isn't possible there.
 
 ## Good to know
 
 - Scouts don't have logins; leaders create and manage them. Scout names don't have to be unique.
 - A scout's total XP is the sum of their activity history, so every award can be traced and undone.
 - Each XP entry stores the activity's name and XP at award time, so editing or deleting an activity later doesn't change past records.
+- The XP unit is written "XP" in the Arabic text too.
 - Photos are cropped square, shrunk to 256px in the browser, and stored in the database.
 - Login attempts are limited to 10 per 15 minutes per IP (kept in memory, so it resets on restart).
 - There is no "forgot password" flow yet. Another leader can remove and re-add the account, or you can delete the row in Neon's SQL Editor.
 - The public page shows children's names and photos to anyone with the link. Consider guardian consent and using first names or nicknames as the display name.
+
+## Recent changes (handoff notes)
+
+For picking this project up in a new conversation. Full detail is in `CHANGES.md`.
+
+- Arabic is the default and the layout stays RTL in both languages. To make it LTR in both, change `dir = 'rtl'` in `common.js`.
+- Arabic wording: leader area is "القيادة", the dashboard link is "قائمة الكشاف", logout is "تسجيل خروج", and the XP unit is "XP". The English labels were not changed (still "Dashboard", "Leader area").
+- Header: the leader's username sits next to "القيادة" with a thin divider on its left.
+- Confirmation popup (`confirmBox()` in `common.js`, styles at the end of `style.css`) replaces `confirm()` in the four delete/undo actions. Cancel is focused by default; Esc and the backdrop cancel.
+- Request logging and the activity log tab were added (see above). Run `npm install` after pulling these changes so `morgan` is installed.
+- None of this has been run against a real database yet. Only syntax checks were done, so test on a separate Neon branch first. After deploying, hard refresh (Ctrl+Shift+R) to avoid cached pages.
+
+**Latest round (leaders as scouts, roles/tags, search):** new tables `labels` and `scout_labels`, new column `leaders.scout_id` (all applied automatically on startup). New text keys are in both JSON files. Like the earlier changes, this was syntax-checked only, so test on a separate Neon branch first.
+
+Ideas not done yet: a display name for leaders (the header shows the username), English wording to match the Arabic changes ("Scout list", "Leadership"), and visitor analytics.
 
 ## Customizing
 

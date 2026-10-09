@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="ar" dir="rtl">
+<html lang="ar" dir="rtl" data-title="title_dashboard">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Jawlat</title>
+  <title>قائمة الكشاف</title>
   <link rel="icon" href="/favicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -30,8 +30,9 @@
     let scouts = [], current = null, data = null;
 
     function drawList() {
-      const q = search.value.trim().toLowerCase();
-      renderScoutList(listEl, scouts.filter((s) => s.name.toLowerCase().includes(q)), current, openScout);
+      const q = norm(search.value.trim());
+      const hit = (s) => [s.name, ...(s.roles || []).flatMap((r) => [r.name_en, r.name_ar])].some((v) => norm(v).includes(q));
+      renderScoutList(listEl, scouts.filter(hit), current, openScout, (s) => el('span', { class: 'sub' }, roleChips(s.roles)), scouts.length ? 'no_results' : 'no_scouts');
     }
     function drawDetail() {
       detailEl.replaceChildren();

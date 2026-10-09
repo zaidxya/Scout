@@ -172,3 +172,20 @@ dialog.confirm .actions { display: flex; gap: .6rem; justify-content: flex-end; 
 dialog.confirm .btn.danger { background: var(--danger); }
 dialog.confirm .btn.danger:hover { background: #8f1d17; }
 @keyframes confirm-in { from { opacity: 0; transform: translateY(8px) scale(.97); } to { opacity: 1; transform: none; } }
+
+/* roles, tags, leader badge */
+.chips { display: inline-flex; flex-wrap: wrap; gap: .25rem; }
+.scout-list .sub { display: flex; flex-wrap: wrap; gap: .25rem; margin-top: .15rem; }
+.scout-list .sub:empty { display: none; }
+.chip { display: inline-flex; align-items: center; gap: .3rem; font-size: .72rem; font-weight: 600; line-height: 1.5; padding: 0 .55rem; border-radius: 999px; border: 1px solid var(--sand); background: var(--sand-soft); color: var(--wine); }
+.chip.tag { background: transparent; border-style: dashed; color: var(--muted); }
+.chip.leader { background: var(--wine); border-color: var(--wine); color: var(--sand); }
+.chips.big { margin: .3rem 0 .5rem; gap: .4rem; }
+.chips.big .chip { font-size: .85rem; padding: .1rem .35rem .1rem .7rem; }
+[dir=rtl] .chips.big .chip { padding: .1rem .7rem .1rem .35rem; }
+.chip button { all: unset; cursor: pointer; width: 1.2rem; height: 1.2rem; text-align: center; border-radius: 50%; line-height: 1.2rem; }
+.chip button:hover { background: var(--wine); color: var(--sand); }
+.chip button:focus-visible { outline: 2px solid var(--wine); }
+input.swatch { width: 2.6rem; height: 2rem; padding: 0; border: 1px solid var(--line); border-radius: 6px; background: #fff; cursor: pointer; }
+.chip.role, .chip.tag { white-space: nowrap; }
+input.prio { width: 4.5rem; padding: .25rem .4rem; border: 1px solid var(--line); border-radius: 6px; font: inherit; }

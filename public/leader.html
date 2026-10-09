@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="ar" dir="rtl">
+<html lang="ar" dir="rtl" data-title="title_leader">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Jawlat</title>
+  <title>القيادة</title>
   <link rel="icon" href="/favicon.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
@@ -31,6 +31,7 @@
       <div class="tabs" role="tablist">
         <button id="btn-scouts" type="button" role="tab" data-i18n="tab_scouts"></button>
         <button id="btn-activities" type="button" role="tab" data-i18n="tab_activities"></button>
+        <button id="btn-labels" type="button" role="tab" data-i18n="tab_labels"></button>
         <button id="btn-leaders" type="button" role="tab" data-i18n="tab_leaders"></button>
         <button id="btn-log" type="button" role="tab" data-i18n="tab_log"></button>
       </div>
@@ -45,6 +46,11 @@
               <button class="btn" type="submit" data-i18n="add"></button>
             </div>
           </form>
+          <input id="q" type="search" data-i18n-ph="search_leader" aria-label="Search">
+          <div class="row" style="margin-top:.5rem">
+            <select id="fRole" aria-label="Role"></select>
+            <select id="fTag" aria-label="Tag"></select>
+          </div>
           <ul id="list" class="scout-list"></ul>
         </section>
         <section id="right" class="detail"></section>
@@ -74,6 +80,27 @@
         </div>
       </div>
 
+      <div id="tab-labels" class="hidden">
+        <div class="panel">
+          <h2 data-i18n="labels_title"></h2>
+          <p class="hint" data-i18n="labels_hint"></p>
+          <div id="labelLists"></div>
+          <form id="labelForm">
+            <h3 data-i18n="add_label"></h3>
+            <label><span data-i18n="label_type"></span>
+              <select name="kind" style="max-width:12rem"><option value="role" data-i18n="kind_role"></option><option value="tag" data-i18n="kind_tag"></option></select></label>
+            <div class="grid2">
+              <label><span data-i18n="name_en"></span><input name="name_en" type="text" maxlength="40"></label>
+              <label><span data-i18n="name_ar"></span><input name="name_ar" type="text" maxlength="40" dir="rtl"></label>
+            </div>
+            <label><span data-i18n="color"></span><input name="color" type="color" value="#d3ad80" class="swatch"></label>
+            <label><span data-i18n="priority"></span><input name="priority" type="number" min="0" max="1000" step="1" value="0" style="max-width:8rem"></label>
+            <p class="hint" data-i18n="priority_hint"></p>
+            <button class="btn" type="submit" data-i18n="add"></button>
+          </form>
+        </div>
+      </div>
+
       <div id="tab-leaders" class="hidden">
         <div class="panel">
           <h2 data-i18n="leaders_title"></h2>
@@ -85,6 +112,8 @@
               <label><span data-i18n="password"></span><input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
             </div>
             <p class="hint" data-i18n="pw_hint"></p>
+            <label><span data-i18n="display_name"></span><input name="display_name" type="text" maxlength="60"></label>
+            <p class="hint" data-i18n="display_name_hint"></p>
             <button class="btn" type="submit" data-i18n="add"></button>
           </form>
         </div>
@@ -102,8 +131,8 @@
   <script src="/common.js"></script>
   <script>
     const $ = (id) => document.getElementById(id);
-    let scouts = [], current = null, data = null, det = null, acts = [], leaders = [], me = '';
-    const TABS = ['scouts', 'activities', 'leaders', 'log'];
+    let scouts = [], current = null, data = null, det = null, acts = [], labels = [], leaders = [], me = '';
+    const TABS = ['scouts', 'activities', 'labels', 'leaders', 'log'];
 
     const msg = (text, ok) => { $('toast').textContent = text || ''; $('toast').className = 'error' + (ok ? ' ok' : ''); };
     const fail = (e) => { if (e.status === 401 && e.code === 'unauthorized') show(false); msg(errText(e)); };
@@ -122,14 +151,44 @@
         $('btn-' + x).setAttribute('aria-selected', String(x === n));
       });
       if (n === 'activities') loadActs();
+      if (n === 'labels') loadLabels();
       if (n === 'leaders') loadLeaders();
       if (n === 'log') loadLog();
     }
     TABS.forEach((x) => $('btn-' + x).addEventListener('click', () => showTab(x)));
 
     // ---------- scouts ----------
-    async function loadScouts() { scouts = await api('/api/scouts'); drawList(); }
-    function drawList() { renderScoutList($('list'), scouts, current, openScout); }
+    const labelName = (l) => (state.lang === 'ar' ? l.name_ar : l.name_en);
+    const labelById = (id) => labels.find((l) => l.id === id);
+    async function loadScouts() { scouts = await api('/api/leader/scouts'); drawList(); }
+
+    // search matches name, full name, phone, group, and the names of assigned roles/tags (both languages)
+    function matches(s, q) {
+      if (!q) return true;
+      const names = s.label_ids.map(labelById).filter(Boolean).flatMap((l) => [l.name_en, l.name_ar]);
+      return [s.name, s.full_name, s.phone, s.group_name, ...names].some((v) => norm(v).includes(q));
+    }
+    function drawFilters() {
+      const fill = (sel, kind, allKey) => {
+        const keep = sel.value;
+        sel.replaceChildren(el('option', { value: '' }, t(allKey)),
+          labels.filter((l) => l.kind === kind).map((l) => el('option', { value: l.id }, labelName(l))));
+        sel.value = [...sel.options].some((o) => o.value === keep) ? keep : '';
+      };
+      fill($('fRole'), 'role', 'all_roles'); fill($('fTag'), 'tag', 'all_tags');
+    }
+    function chips(ids) {
+      return el('span', { class: 'chips' }, ids.map(labelById).filter(Boolean)
+        .map((l) => el('span', { class: 'chip ' + l.kind, style: chipStyle(l) }, labelName(l))));
+    }
+    function drawList() {
+      const q = norm($('q').value.trim()), fr = Number($('fRole').value), ft = Number($('fTag').value);
+      const shown = scouts.filter((s) => matches(s, q) && (!fr || s.label_ids.includes(fr)) && (!ft || s.label_ids.includes(ft)));
+      renderScoutList($('list'), shown, current, openScout,
+        (s) => el('span', { class: 'sub' }, chips(s.label_ids)),
+        scouts.length ? 'no_results' : 'no_scouts');
+    }
+    ['q', 'fRole', 'fTag'].forEach((id) => $(id).addEventListener('input', drawList));
 
     async function openScout(id) {
       current = id; drawList();
@@ -184,6 +243,25 @@
         catch (e) { fail(e); }
       });
 
+      // roles and tags
+      const mine = (scouts.find((s) => s.id === data.id) || { label_ids: [] }).label_ids;
+      const saveLabels = async (ids) => {
+        try { await api(`/api/scouts/${data.id}/labels`, 'PUT', { label_ids: ids }); msg(''); await refresh(); } catch (e) { fail(e); }
+      };
+      const labelBlock = (kind, titleKey) => {
+        const own = labels.filter((l) => l.kind === kind && mine.includes(l.id));
+        const free = labels.filter((l) => l.kind === kind && !mine.includes(l.id));
+        const pick = el('select', { 'aria-label': t(titleKey) }, el('option', { value: '' }, t('add_to_scout')),
+          free.map((l) => el('option', { value: l.id }, labelName(l))));
+        pick.addEventListener('change', () => { if (pick.value) saveLabels([...mine, Number(pick.value)]); });
+        return el('div', { style: 'margin-bottom:.9rem' }, el('h3', {}, t(titleKey)),
+          own.length ? el('div', { class: 'chips big' }, own.map((l) => el('span', { class: 'chip ' + kind, style: chipStyle(l) },
+            labelName(l), el('button', { type: 'button', 'aria-label': t('remove'), onclick: () => saveLabels(mine.filter((i) => i !== l.id)) }, '×'))))
+            : el('p', { class: 'empty', style: 'margin:.2rem 0' }, t('no_labels')),
+          free.length ? pick : '');
+      };
+      const labelsPanel = el('div', { class: 'panel' }, labelBlock('role', 'roles'), labelBlock('tag', 'tags'));
+
       // photo
       const file = el('input', { type: 'file', accept: 'image/*', class: 'hidden' });
       file.addEventListener('change', async () => {
@@ -228,7 +306,7 @@
         catch (e) { fail(e); }
       } }, t('delete_scout'));
 
-      box.append(renderDetailHead(data), awardForm,
+      box.append(renderDetailHead(data, false), awardForm, labelsPanel,
         renderLog(data, async (xpId) => {
           if (!(await confirmBox(t('confirm_undo'), t('undo')))) return;
           try { await api('/api/xp/' + xpId, 'DELETE'); await refresh(); } catch (e) { fail(e); }
@@ -286,11 +364,41 @@
           el('small', { style: 'display:block;opacity:.7' }, new Date(r.created_at).toLocaleString(locale(), { dateStyle: 'medium', timeStyle: 'short' }))))));
     }
 
+    // ---------- roles and tags ----------
+    async function loadLabels() { try { labels = await api('/api/labels'); drawLabels(); drawFilters(); drawList(); if (data && det) drawDetail(); } catch (e) { fail(e); } }
+    function drawLabels() {
+      $('labelLists').replaceChildren(...[['role', 'roles'], ['tag', 'tags']].map(([kind, key]) => {
+        const rows = labels.filter((l) => l.kind === kind);
+        return el('div', {}, el('h3', {}, t(key)),
+          el('ul', { class: 'simple-list' }, rows.length ? rows.map((l) => el('li', {},
+            el('span', { class: 'chip ' + kind, style: chipStyle(l) }, labelName(l)),
+            el('input', { type: 'color', value: l.color || '#d3ad80', 'aria-label': t('color'), class: 'swatch', onchange: (ev) => updateLabel(l, { color: ev.target.value }) }),
+            l.color ? el('button', { class: 'btn ghost small', type: 'button', onclick: () => updateLabel(l, { color: '' }) }, t('default_color')) : '',
+            kind === 'role' ? el('input', { type: 'number', min: '0', max: '1000', step: '1', value: String(l.priority || 0), class: 'prio', 'aria-label': t('priority'), title: t('priority'),
+              onchange: (ev) => updateLabel(l, { priority: ev.target.value }) }) : '',
+            el('span', { class: 'grow' }, l.name_en !== l.name_ar ? el('small', { style: 'opacity:.6' }, state.lang === 'ar' ? l.name_en : l.name_ar) : ''),
+            el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
+              if (!(await confirmBox(t('confirm_delete_label')))) return;
+              try { await api('/api/labels/' + l.id, 'DELETE'); await loadLabels(); await loadScouts(); } catch (e) { fail(e); }
+            } }, t('delete')))) : el('li', { class: 'empty' }, t('no_labels'))));
+      }));
+    }
+    async function updateLabel(l, patch) {
+      try { await api('/api/labels/' + l.id, 'PUT', patch); await loadLabels(); await loadScouts(); msg(t('saved'), true); } catch (e) { fail(e); }
+    }
+    $('labelForm').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const f = new FormData(ev.target);
+      try { await api('/api/labels', 'POST', { kind: f.get('kind'), name_en: f.get('name_en'), name_ar: f.get('name_ar'), color: f.get('color'), priority: f.get('priority') }); ev.target.reset(); msg(t('saved'), true); await loadLabels(); }
+      catch (e) { fail(e); }
+    });
+
     // ---------- leaders ----------
     async function loadLeaders() { try { leaders = await api('/api/leaders'); drawLeaders(); } catch (e) { fail(e); } }
     function drawLeaders() {
       $('leaderList').replaceChildren(...leaders.map((l) => el('li', {},
-        el('span', { class: 'grow' }, l.username, l.username === me ? ` ${t('you')}` : ''),
+        el('span', { class: 'grow' }, l.username, l.username === me ? ` ${t('you')}` : '',
+          l.scout_name && l.scout_name !== l.username ? el('small', { style: 'display:block;opacity:.7' }, `${t('scout_profile')} ${l.scout_name}`) : ''),
         l.username === me ? '' : el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
           if (!(await confirmBox(t('confirm_delete_leader')))) return;
           try { await api('/api/leaders/' + l.id, 'DELETE'); await loadLeaders(); } catch (e) { fail(e); }
@@ -299,7 +407,7 @@
     $('leaderForm').addEventListener('submit', async (ev) => {
       ev.preventDefault();
       const f = new FormData(ev.target);
-      try { await api('/api/leaders', 'POST', { username: f.get('username'), password: f.get('password') }); ev.target.reset(); msg(t('saved'), true); await loadLeaders(); }
+      try { await api('/api/leaders', 'POST', { username: f.get('username'), password: f.get('password'), display_name: f.get('display_name') }); ev.target.reset(); msg(t('saved'), true); await loadLeaders(); await loadScouts(); }
       catch (e) { fail(e); }
     });
     $('pwForm').addEventListener('submit', async (ev) => {
@@ -312,7 +420,7 @@
     // ---------- login / boot ----------
     async function enter(username) {
       me = username; show(true); showTab('scouts');
-      try { acts = await api('/api/activities'); await loadScouts(); } catch (e) { fail(e); }
+      try { [acts, labels] = await Promise.all([api('/api/activities'), api('/api/labels')]); drawFilters(); await loadScouts(); } catch (e) { fail(e); }
       drawDetail();
     }
     $('loginForm').addEventListener('submit', async (ev) => {
@@ -327,7 +435,7 @@
 
     document.addEventListener('langchange', () => {
       if ($('app').classList.contains('hidden')) return;
-      drawList(); drawDetail(); drawActs(); drawLeaders(); drawLog();
+      drawFilters(); drawList(); drawDetail(); drawActs(); drawLabels(); drawLeaders(); drawLog();
     });
 
     (async () => {
