@@ -372,7 +372,7 @@
       $('labelLists').replaceChildren(...[['role', 'roles'], ['tag', 'tags']].map(([kind, key]) => {
         const rows = labels.filter((l) => l.kind === kind);
         return el('div', {}, el('h3', {}, t(key)),
-          el('ul', { class: 'simple-list' }, rows.length ? rows.map((l) => el('li', {},
+          el('ul', { class: 'simple-list' }, rows.length ? rows.map((l) => el('li', { class: 'lbl' },
             el('span', { class: 'chip ' + kind, style: chipStyle(l) }, labelName(l)),
             el('input', { type: 'color', value: l.color || '#d3ad80', 'aria-label': t('color'), class: 'swatch', onchange: (ev) => updateLabel(l, { color: ev.target.value }) }),
             l.color ? el('button', { class: 'btn ghost small', type: 'button', onclick: () => updateLabel(l, { color: '' }) }, t('default_color')) : '',
