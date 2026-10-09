@@ -1,6 +1,11 @@
 {
+<<<<<<< HEAD
   "title": "جولات",
   "subtitle": "نشاط الكشافة و XP",
+=======
+  "title": "Scout",
+  "subtitle": "قائمة الكشافة",
+>>>>>>> 8a6eba114a19042b434594fbe79a52a9818bba57
   "lang_toggle": "English",
   "leader_area": "القيادة",
   "home": "قائمة الكشاف",
