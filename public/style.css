@@ -163,7 +163,7 @@ label input, label select, label textarea { margin-top: .2rem; }
 .simple-list li.acct > .grow { flex: 1 1 10rem; }
 .simple-list li.acct > form { flex: 1 1 100%; margin: 0 0 .25rem; }
 .hidden { display: none !important; }
-@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; scroll-behavior: auto !important; } }
 
 /* confirmation popup */
 dialog.confirm {
@@ -285,3 +285,18 @@ input.phone {
 input.phone::placeholder { color: var(--muted); font-weight: 400; letter-spacing: 0; }
 input.phone:hover { background-color: #fff; }
 input.phone:focus { background-color: #fff; border-color: var(--wine); box-shadow: 0 0 0 3px rgba(211,173,128,.45); outline: none; }
+
+/* hidden until the language file is applied (class set by common.js) so the wrong language never flashes */
+.js body:not(.ready) { visibility: hidden; }
+
+/* smoothness: gentle transitions, fading tab panes, no tap delay */
+html { scroll-behavior: smooth; }
+a, button, .btn, input, select, textarea { transition: background-color .15s, border-color .15s, color .15s, box-shadow .15s, transform .1s; }
+button, a, select, input[type=checkbox] { touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+.btn:active, .scout-list button:active { transform: scale(.985); }
+@keyframes pane-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+[id^="tab-"]:not(.hidden) { animation: pane-in .18s ease-out; }
+
+/* troops */
+#troopPick, #troopFilter { margin-bottom: .6rem; }
+.troop-tag { font-size: .75rem; color: var(--muted); font-weight: 400; }

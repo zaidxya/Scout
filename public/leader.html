@@ -5,7 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>القيادة</title>
   <link rel="icon" href="/favicon.png">
+  <script>document.documentElement.classList.add('js')</script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/style.css">
 </head>
@@ -32,6 +34,7 @@
         <button id="btn-scouts" type="button" role="tab" data-i18n="tab_scouts"></button>
         <button id="btn-activities" type="button" role="tab" data-i18n="tab_activities"></button>
         <button id="btn-labels" type="button" role="tab" data-i18n="tab_labels"></button>
+        <button id="btn-troops" type="button" role="tab" data-i18n="tab_troops"></button>
         <button id="btn-leaders" type="button" role="tab" data-i18n="tab_leaders"></button>
         <button id="btn-log" type="button" role="tab" data-i18n="tab_log"></button>
         <button id="btn-password" type="button" role="tab" data-i18n="tab_password"></button>
@@ -40,10 +43,12 @@
 
       <div id="tab-scouts" class="cols">
         <section>
+          <select id="troopFilter" class="hidden"></select>
           <form id="addForm" class="panel">
             <h2 data-i18n="add_scout"></h2>
             <div class="row">
               <input name="name" type="text" maxlength="60" data-i18n-ph="scout_name" aria-label="Scout name" required>
+              <select name="troop_id" id="addTroop" class="hidden" aria-label="Troop" style="max-width:9rem"></select>
               <button class="btn" type="submit" data-i18n="add"></button>
             </div>
           </form>
@@ -56,7 +61,7 @@
       <div id="tab-activities" class="hidden">
         <div class="panel">
           <h2 data-i18n="activities_title"></h2>
-          <p class="hint" data-i18n="activity_hint"></p>
+          <p id="actHint" class="hint" data-i18n="activity_hint"></p>
           <ul id="actList" class="simple-list"></ul>
           <form id="actForm">
             <h3 data-i18n="add_activity"></h3>
@@ -98,6 +103,22 @@
         </div>
       </div>
 
+      <div id="tab-troops" class="hidden">
+        <div class="panel">
+          <h2 data-i18n="troops_title"></h2>
+          <p class="hint" data-i18n="troops_hint"></p>
+          <ul id="troopList" class="simple-list"></ul>
+          <form id="troopForm">
+            <h3 data-i18n="add_troop"></h3>
+            <div class="grid2">
+              <label><span data-i18n="name_en"></span><input name="name_en" type="text" maxlength="60"></label>
+              <label><span data-i18n="name_ar"></span><input name="name_ar" type="text" maxlength="60" dir="rtl"></label>
+            </div>
+            <button class="btn" type="submit" data-i18n="add"></button>
+          </form>
+        </div>
+      </div>
+
       <div id="tab-password" class="hidden">
         <form id="pwForm" class="panel">
           <h2 data-i18n="change_password"></h2>
@@ -120,6 +141,7 @@
               <label><span data-i18n="password"></span><input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
             </div>
             <p class="hint" data-i18n="pw_hint"></p>
+            <label id="troopField" class="hidden"><span data-i18n="troop"></span><select name="troop_id" id="leaderTroop" style="max-width:14rem"></select></label>
             <label id="roleField" class="hidden"><span data-i18n="account_type"></span>
               <select name="role" style="max-width:12rem"><option value="leader" data-i18n="acct_leader"></option><option value="admin" data-i18n="acct_admin"></option></select></label>
             <label><span data-i18n="display_name"></span><input name="display_name" type="text" maxlength="60"></label>
@@ -133,10 +155,12 @@
   <script src="/common.js"></script>
   <script>
     const $ = (id) => document.getElementById(id);
-    let scouts = [], current = null, data = null, det = null, acts = [], labels = [], leaders = [], me = '', myRole = 'leader';
+    let scouts = [], current = null, data = null, det = null, acts = [], labels = [], leaders = [], troops = [], me = '', myRole = 'leader', myTroop = null;
     const isAdmin = () => myRole === 'admin' || myRole === 'super_admin';
-    const TABS = ['scouts', 'activities', 'labels', 'leaders', 'log', 'password'];
-    const ADMIN_TABS = ['labels', 'leaders', 'log']; // only admins see these
+    const isSuper = () => myRole === 'super_admin';
+    const TABS = ['scouts', 'activities', 'labels', 'troops', 'leaders', 'log', 'password'];
+    const ADMIN_TABS = ['leaders', 'log']; // admins and the super admin
+    const SUPER_TABS = ['labels', 'troops']; // the super admin only: shared roles/tags and the troops themselves
 
     const msg = (text, ok) => { $('toast').textContent = text || ''; $('toast').className = 'error' + (ok ? ' ok' : ''); };
     const fail = (e) => { if (e.status === 401 && e.code === 'unauthorized') show(false); msg(errText(e)); };
@@ -148,10 +172,16 @@
       $('meName').textContent = authed && me ? me : '';
       $('meName').style.display = authed && me ? '' : 'none';
     }
-    // hide the admin-only tabs from regular leaders
-    function applyRole() { ADMIN_TABS.forEach((x) => $('btn-' + x).classList.toggle('hidden', !isAdmin())); }
+    // hide the admin-only and super-admin-only pieces from everyone else
+    function applyRole() {
+      ADMIN_TABS.forEach((x) => $('btn-' + x).classList.toggle('hidden', !isAdmin()));
+      SUPER_TABS.forEach((x) => $('btn-' + x).classList.toggle('hidden', !isSuper()));
+      $('actForm').classList.toggle('hidden', !isSuper()); // the shared activity list is read-only for everyone else
+      $('actHint').dataset.i18n = isSuper() ? 'activity_hint' : 'activity_hint_readonly';
+      $('actHint').textContent = t($('actHint').dataset.i18n);
+    }
     function showTab(n) {
-      if (ADMIN_TABS.includes(n) && !isAdmin()) n = 'scouts';
+      if ((ADMIN_TABS.includes(n) && !isAdmin()) || (SUPER_TABS.includes(n) && !isSuper())) n = 'scouts';
       msg('');
       TABS.forEach((x) => {
         $('tab-' + x).classList.toggle('hidden', x !== n);
@@ -160,6 +190,7 @@
       });
       if (n === 'activities') loadActs();
       if (n === 'labels') loadLabels();
+      if (n === 'troops') loadTroops();
       if (n === 'leaders' && isAdmin()) loadLeaders();
       if (n === 'log') loadLog();
     }
@@ -180,14 +211,38 @@
       return el('span', { class: 'chips' }, ids.map(labelById).filter(Boolean)
         .map((l) => el('span', { class: 'chip ' + l.kind, style: chipStyle(l) }, labelName(l))));
     }
+    // ---------- troops (names, pickers) ----------
+    const troopName = (tr) => (tr ? (state.lang === 'ar' ? tr.name_ar : tr.name_en) : '');
+    const troopById = (id) => troops.find((x) => x.id === id);
+    const multiTroop = () => troops.length > 1;
+    // fill the troop dropdowns (filter above the scout list, add-scout, add-leader), keeping what was selected
+    function fillTroopSelects() {
+      const opts = () => troops.map((x) => el('option', { value: String(x.id) }, troopName(x)));
+      const fill = (sel, extra, fallback) => {
+        const keep = sel.value || fallback;
+        sel.replaceChildren(...extra, ...opts());
+        if ([...sel.options].some((o) => o.value === String(keep))) sel.value = String(keep);
+      };
+      fill($('troopFilter'), [el('option', { value: '' }, t('troop_all'))], '');
+      fill($('addTroop'), [], $('troopFilter').value || myTroop);
+      fill($('leaderTroop'), [], myTroop);
+      const show = isSuper() && multiTroop();
+      ['troopFilter', 'addTroop'].forEach((id) => $(id).classList.toggle('hidden', !show));
+      $('troopField').classList.toggle('hidden', !show);
+      $('troopFilter').setAttribute('aria-label', t('troop_picker'));
+    }
+    $('troopFilter').addEventListener('change', () => { if ($('troopFilter').value) $('addTroop').value = $('troopFilter').value; drawList(); });
+
     function drawList() {
       const q = norm($('q').value.trim());
-      const shown = scouts.filter((s) => matches(s, q));
+      const tf = isSuper() ? $('troopFilter').value : '';
+      const shown = scouts.filter((s) => (!tf || String(s.troop_id) === tf) && matches(s, q));
       renderScoutList($('list'), shown, current, (id) => openScout(id),
-        (s) => el('span', { class: 'sub' }, chips(s.label_ids)),
+        (s) => el('span', { class: 'sub' }, chips(s.label_ids),
+          isSuper() && multiTroop() && !tf ? el('span', { class: 'troop-tag' }, troopName(troopById(s.troop_id))) : ''),
         scouts.length ? 'no_results' : 'no_scouts');
     }
-    $('q').addEventListener('input', drawList);
+    $('q').addEventListener('input', frame(drawList));
 
     async function openScout(id, scrollNext = true) {
       current = id; drawList();
@@ -241,12 +296,13 @@
       const awardForm = el('form', { class: 'panel' },
         el('h2', {}, t('award_xp')),
         el('label', {}, t('activity_select'), sel),
+        el('label', {}, t('activity_date'), el('input', { name: 'date', type: 'date', required: '', value: new Date().toLocaleDateString('en-CA'), max: new Date().toLocaleDateString('en-CA') })),
         el('label', {}, t('note'), el('input', { name: 'note', type: 'text', maxlength: '200' })),
         el('button', { class: 'btn', type: 'submit' }, t('award')));
       awardForm.addEventListener('submit', async (ev) => {
         ev.preventDefault();
         const f = new FormData(awardForm);
-        try { await api(`/api/scouts/${data.id}/xp`, 'POST', { activity_id: Number(f.get('activity_id')), note: f.get('note') }); msg(''); await refresh(); }
+        try { await api(`/api/scouts/${data.id}/xp`, 'POST', { activity_id: Number(f.get('activity_id')), date: f.get('date'), note: f.get('note') }); msg(''); await refresh(); }
         catch (e) { fail(e); }
       });
 
@@ -323,8 +379,9 @@
     $('addForm').addEventListener('submit', async (ev) => {
       ev.preventDefault();
       try {
-        const s = await api('/api/scouts', 'POST', { name: new FormData(ev.target).get('name') });
-        ev.target.reset(); msg(''); await loadScouts(); await openScout(s.id);
+        const s = await api('/api/scouts', 'POST', { name: new FormData(ev.target).get('name'), troop_id: isSuper() ? Number($('addTroop').value) || myTroop : undefined });
+        const keepTroop = $('addTroop').value;
+        ev.target.reset(); $('addTroop').value = keepTroop; msg(''); await loadScouts(); await openScout(s.id);
       } catch (e) { fail(e); }
     });
 
@@ -334,10 +391,10 @@
       $('actList').replaceChildren(...acts.map((a) => el('li', {},
         el('span', { class: 'grow' }, state.lang === 'ar' ? a.name_ar : a.name_en),
         el('b', { style: a.xp < 0 ? 'color:var(--danger)' : '' }, `${signed(a.xp)} ${t('xp')}`),
-        el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
+        isSuper() ? el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
           if (!(await confirmBox(t('confirm_delete_activity')))) return;
           try { await api('/api/activities/' + a.id, 'DELETE'); await loadActs(); } catch (e) { fail(e); }
-        } }, t('delete')))));
+        } }, t('delete')) : '')));
     }
     $('actForm').addEventListener('submit', async (ev) => {
       ev.preventDefault();
@@ -367,7 +424,8 @@
       if (!logRows.length) { ul.replaceChildren(el('li', { class: 'empty' }, t('log_empty'))); return; }
       ul.replaceChildren(...logRows.map((r) => el('li', {},
         el('span', { class: 'grow' }, el('b', {}, r.leader_name), ' ', describe(r),
-          el('small', { style: 'display:block;opacity:.7' }, new Date(r.created_at).toLocaleString(locale(), { dateStyle: 'medium', timeStyle: 'short' }))))));
+          el('small', { style: 'display:block;opacity:.7' }, new Date(r.created_at).toLocaleString(locale(), { dateStyle: 'medium', timeStyle: 'short' }),
+            isSuper() && multiTroop() && r.troop_id ? ` · ${state.lang === 'ar' ? r.troop_name_ar : r.troop_name_en}` : '')))));
     }
 
     // ---------- roles and tags ----------
@@ -399,6 +457,36 @@
       catch (e) { fail(e); }
     });
 
+    // ---------- troops (super admin) ----------
+    async function loadTroops() { try { troops = await api('/api/troops'); fillTroopSelects(); drawTroops(); drawList(); } catch (e) { fail(e); } }
+    function drawTroops() {
+      $('troopList').replaceChildren(...troops.map((tr) => {
+        const editRow = el('form', { class: 'row hidden' },
+          el('input', { name: 'name_en', type: 'text', maxlength: '60', value: tr.name_en, dir: 'ltr', 'aria-label': t('name_en') }),
+          el('input', { name: 'name_ar', type: 'text', maxlength: '60', value: tr.name_ar, dir: 'rtl', 'aria-label': t('name_ar') }),
+          el('button', { class: 'btn small', type: 'submit' }, t('save')));
+        editRow.addEventListener('submit', async (ev) => {
+          ev.preventDefault();
+          const f = new FormData(editRow);
+          try { await api('/api/troops/' + tr.id, 'PUT', { name_en: f.get('name_en'), name_ar: f.get('name_ar') }); await loadTroops(); msg(t('saved'), true); } catch (e) { fail(e); }
+        });
+        return el('li', { class: 'acct' },
+          el('span', { class: 'grow' }, troopName(tr), tr.id === myTroop ? ` ${t('you')}` : ''),
+          el('button', { class: 'btn ghost small', type: 'button', onclick: () => { editRow.classList.toggle('hidden'); editRow.querySelector('input').focus(); } }, t('edit')),
+          el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
+            if (!(await confirmBox(t('confirm_delete_troop')))) return;
+            try { await api('/api/troops/' + tr.id, 'DELETE'); await loadTroops(); } catch (e) { fail(e); }
+          } }, t('delete')),
+          editRow);
+      }));
+    }
+    $('troopForm').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const f = new FormData(ev.target);
+      try { await api('/api/troops', 'POST', { name_en: f.get('name_en'), name_ar: f.get('name_ar') }); ev.target.reset(); msg(t('saved'), true); await loadTroops(); }
+      catch (e) { fail(e); }
+    });
+
     // ---------- leaders ----------
     async function loadLeaders() { try { leaders = await api('/api/leaders'); drawLeaders(); } catch (e) { fail(e); } }
     const acctName = (r) => t('acct_' + r);
@@ -416,6 +504,7 @@
         return el('li', { class: 'acct' },
           el('span', { class: 'grow' }, l.username, l.username === me ? ` ${t('you')}` : '', ' ',
             el('span', { class: 'chip' + (l.role === 'leader' ? '' : ' leader') }, acctName(l.role)),
+            isSuper() && multiTroop() ? el('small', { style: 'display:block;opacity:.7' }, `${t('troop')}: ${state.lang === 'ar' ? l.troop_name_ar : l.troop_name_en}`) : '',
             l.scout_name && l.scout_name !== l.username ? el('small', { style: 'display:block;opacity:.7' }, `${t('scout_profile')} ${l.scout_name}`) : ''),
           l.can_manage ? el('button', { class: 'btn ghost small', type: 'button', onclick: () => { pwRow.classList.toggle('hidden'); pwRow.querySelector('input').focus(); } }, t('reset_password')) : '',
           l.can_manage ? el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
@@ -428,7 +517,7 @@
     $('leaderForm').addEventListener('submit', async (ev) => {
       ev.preventDefault();
       const f = new FormData(ev.target);
-      try { await api('/api/leaders', 'POST', { username: f.get('username'), password: f.get('password'), display_name: f.get('display_name'), role: f.get('role') || 'leader' }); ev.target.reset(); msg(t('saved'), true); await loadLeaders(); await loadScouts(); }
+      try { await api('/api/leaders', 'POST', { username: f.get('username'), password: f.get('password'), display_name: f.get('display_name'), role: f.get('role') || 'leader', troop_id: isSuper() ? Number(f.get('troop_id')) || myTroop : undefined }); const keepTroop = $('leaderTroop').value; ev.target.reset(); $('leaderTroop').value = keepTroop; msg(t('saved'), true); await loadLeaders(); await loadScouts(); }
       catch (e) { fail(e); }
     });
     $('pwForm').addEventListener('submit', async (ev) => {
@@ -439,9 +528,9 @@
     });
 
     // ---------- login / boot ----------
-    async function enter(username, role) {
-      me = username; myRole = role || 'leader'; show(true); applyRole(); showTab('scouts'); drawLeaders();
-      try { [acts, labels] = await Promise.all([api('/api/activities'), api('/api/labels')]); await loadScouts(); } catch (e) { fail(e); }
+    async function enter(username, role, troop) {
+      me = username; myRole = role || 'leader'; myTroop = troop ?? null; show(true); applyRole(); showTab('scouts'); drawLeaders();
+      try { [acts, labels, scouts, troops] = await Promise.all([api('/api/activities'), api('/api/labels'), api('/api/leader/scouts'), api('/api/troops')]); fillTroopSelects(); drawList(); } catch (e) { fail(e); }
       drawDetail();
     }
     $('loginForm').addEventListener('submit', async (ev) => {
@@ -449,19 +538,19 @@
       const f = new FormData(ev.target);
       try {
         const r = await api('/api/login', 'POST', { username: f.get('username'), password: f.get('password') });
-        $('loginErr').textContent = ''; ev.target.reset(); await enter(r.username, r.role);
+        $('loginErr').textContent = ''; ev.target.reset(); await enter(r.username, r.role, r.troop_id);
       } catch (e) { $('loginErr').textContent = errText(e); }
     });
     $('logoutBtn').addEventListener('click', async () => { await api('/api/logout', 'POST'); data = det = null; current = null; show(false); });
 
     document.addEventListener('langchange', () => {
       if ($('app').classList.contains('hidden')) return;
-      drawList(); drawDetail(); drawActs(); drawLabels(); drawLeaders(); drawLog();
+      fillTroopSelects(); drawList(); drawDetail(); drawActs(); drawLabels(); drawTroops(); drawLeaders(); drawLog();
     });
 
     (async () => {
-      await initLang();
-      try { const r = await api('/api/me'); await enter(r.username, r.role); } catch { show(false); }
+      const [, r] = await Promise.all([initLang(), api('/api/me').catch(() => null)]); // language + session check at the same time
+      if (r) await enter(r.username, r.role, r.troop_id); else show(false);
     })();
   </script>
 </body>

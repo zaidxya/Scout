@@ -40,7 +40,8 @@ CREATE TABLE IF NOT EXISTS xp_log (
 );
 ALTER TABLE xp_log
   ADD COLUMN IF NOT EXISTS activity_ar TEXT,
-  ADD COLUMN IF NOT EXISTS activity_id INT REFERENCES activities(id) ON DELETE SET NULL;
+  ADD COLUMN IF NOT EXISTS activity_id INT REFERENCES activities(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS activity_date DATE;
 CREATE INDEX IF NOT EXISTS xp_log_scout_idx ON xp_log(scout_id);
 
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -66,6 +67,20 @@ CREATE TABLE IF NOT EXISTS scout_labels (
   label_id INT NOT NULL REFERENCES labels(id) ON DELETE CASCADE,
   PRIMARY KEY (scout_id, label_id)
 );
+CREATE INDEX IF NOT EXISTS scout_labels_label_idx ON scout_labels(label_id);
+-- troops: every scout and every leader account belongs to exactly one troop.
+-- Activities and roles/tags stay shared by all troops (managed by the super admin).
+CREATE TABLE IF NOT EXISTS troops (
+  id SERIAL PRIMARY KEY,
+  name_en TEXT NOT NULL,
+  name_ar TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+ALTER TABLE scouts ADD COLUMN IF NOT EXISTS troop_id INT REFERENCES troops(id);
+ALTER TABLE leaders ADD COLUMN IF NOT EXISTS troop_id INT REFERENCES troops(id);
+ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS troop_id INT REFERENCES troops(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS scouts_troop_idx ON scouts(troop_id);
+CREATE INDEX IF NOT EXISTS audit_log_troop_idx ON audit_log(troop_id);
 -- every leader is also a scout: leaders.scout_id points at their scout profile
 ALTER TABLE leaders ADD COLUMN IF NOT EXISTS scout_id INT REFERENCES scouts(id) ON DELETE SET NULL;
 

@@ -9,13 +9,15 @@ English and Arabic are built in, and the look follows the Jawlat logo (burgundy 
 - Searchable list of scouts, ordered by role priority (see below), then XP
 - Per scout: display name, profile picture, roles (colored chips), XP total and activity history
 
+**Troops**: the site can hold several troops (a troop is a group of scouts of similar age, e.g. Rovers). Every scout and every leader account belongs to one troop. The public dashboard shows one troop at a time (a picker appears when there is more than one; the last choice is remembered). Leaders and admins only ever see and change the scouts of their own troop; the super admin sees all troops, picks the troop when adding scouts and leaders, and manages the troops themselves in the **Troops** tab. **Activities and roles/tags are shared by all troops and can only be changed by the super admin** (everyone else sees the activity list read-only). Patrols (smaller groups inside a troop) are not built yet; the troop layer is designed so they can be added underneath. Existing databases are upgraded automatically: everything that already exists is moved into a first troop called "Rovers" (rename it in the Troops tab).
+
 **Leaders are scouts too**: every leader account has its own scout profile that appears in the public list, earns XP and can have roles and tags like any scout. Adding a leader creates the profile (optional display name, defaults to the username). Existing leaders get a profile automatically on the next startup. Removing a leader keeps their scout profile; a leader's profile can't be deleted while the leader exists.
 
 **Leader area (`/leader.html`)**: password protected
 - **Search and filter**: the scout list has a search box (name, full name, phone, role and tag names in both languages; Arabic spelling variants and diacritics are ignored) plus role and tag filters
 - **Roles & tags tab**: create colored roles with a priority (higher priority = listed first, for everyone) (e.g. Patrol leader) and tags (e.g. First aid) with English and Arabic names. Assign them from a scout's page. Roles are shown on the public dashboard (and searchable there); tags are visible to leaders only
 - **Scouts**: add and delete scouts, award XP from the activity list (with an optional note), undo a mistaken entry, upload a profile picture, edit details
-- **Activities**: manage the activity list. Starter list: Presence +5, Idea +3, Event +10, each with an English and an Arabic name. Use a negative value (for example -5) for activities that deduct XP
+- **Activities**: the shared activity list (everyone reads it; only the super admin changes it). Starter list: Presence +5, Idea +3, Event +10, each with an English and an Arabic name. Use a negative value (for example -5) for activities that deduct XP
 - **Leaders**: add or remove leaders, change your own password
 - **Activity log (سجل النشاط)**: the latest 300 leader actions (logins, scout changes, XP awarded or undone, activity and leader changes), newest first
 
@@ -33,8 +35,8 @@ The header shows the logged-in leader's username next to the "القيادة" ti
 
 | Level | Can add/delete leaders | Can reset others' passwords |
 |---|---|---|
-| **Super admin** (exactly one: the account created from `LEADER_USERNAME`) | yes, including admins | yes, for admins and leaders |
-| **Admin** (created by the super admin) | leaders only | leaders only |
+| **Super admin** (exactly one: the account created from `LEADER_USERNAME`) | yes, in any troop, including admins | yes, for admins and leaders |
+| **Admin** (created by the super admin) | leaders of their own troop only | leaders of their own troop only |
 | **Leader** | no (the Leaders tab only shows "change my password") | no |
 
 The super admin can't be deleted, and nobody can delete their own account. Every check is enforced on the server, not only hidden in the page.
@@ -150,3 +152,6 @@ Ideas not done yet: a display name for leaders (the header shows the username), 
 - `cannot execute CREATE TABLE in a read-only transaction`: the connection string points at a read replica or read-only branch. Copy the string for the primary compute from Neon's **Connect** dialog.
 - Forgot the first leader's password: run `DELETE FROM leaders;` in Neon's SQL Editor and restart. A new leader is created from `.env`.
 - Port 3000 is in use: set `PORT=3001` in `.env`.
+
+### Keeping the site awake (Render free plan)
+Free Render services go to sleep after ~15 minutes without visitors, and the next visit waits 30-60 seconds while it wakes up. To avoid that, point a free uptime monitor (e.g. UptimeRobot or cron-job.org) at `https://YOUR-SITE.onrender.com/healthz` every 10 minutes. The Neon database also sleeps when idle; the first query after a nap can take a second or two.

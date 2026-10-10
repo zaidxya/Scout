@@ -5,7 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>قائمة الكشاف</title>
   <link rel="icon" href="/favicon.png">
+  <script>document.documentElement.classList.add('js')</script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/style.css">
 </head>
@@ -19,6 +21,7 @@
   </header>
   <main class="cols">
     <section>
+      <select id="troopPick" class="hidden"></select>
       <input id="search" type="search" data-i18n-ph="search" aria-label="Search">
       <ul id="list" class="scout-list"></ul>
     </section>
@@ -27,15 +30,19 @@
   <script src="/common.js"></script>
   <script>
     const listEl = document.getElementById('list'), detailEl = document.getElementById('detail'), search = document.getElementById('search');
-    let scouts = [], current = null, data = null;
+    let scouts = [], troops = [], troop = null, current = null, data = null;
+    const picker = document.getElementById('troopPick');
+    const detailCache = {}; // last seen detail per scout, shown instantly while the fresh copy loads
 
     function drawList() {
       const q = norm(search.value.trim());
       const hit = (s) => [s.name, ...(s.roles || []).flatMap((r) => [r.name_en, r.name_ar])].some((v) => norm(v).includes(q));
       renderScoutList(listEl, scouts.filter(hit), current, openScout, (s) => el('span', { class: 'sub' }, roleChips(s.roles)), scouts.length ? 'no_results' : 'no_scouts');
     }
+    let loading = false;
     function drawDetail() {
       detailEl.replaceChildren();
+      if (loading) return detailEl.append(el('p', { class: 'empty' }, t('loading')));
       if (!data) return detailEl.append(el('p', { class: 'empty' }, t('select_scout')));
       detailEl.append(renderDetailHead(data), renderLog(data));
     }
@@ -43,16 +50,60 @@
       current = id;
       history.replaceState(null, '', '#' + id);
       drawList();
-      try { data = await api('/api/scouts/' + id); } catch { data = null; }
-      drawDetail();
+      data = detailCache[id] || null; loading = !data; drawDetail(); // cached copy (or a loading note) right away
+      try {
+        const fresh = await api('/api/scouts/' + id);
+        if (current !== id) return; // the visitor already picked someone else
+        const changed = JSON.stringify(fresh) !== JSON.stringify(data);
+        detailCache[id] = data = fresh; loading = false;
+        if (fresh.troop_id && fresh.troop_id !== troop && troops.some((x) => x.id === fresh.troop_id)) await switchTroop(fresh.troop_id, true); // link to a scout of another troop
+        if (changed) drawDetail();
+      } catch { if (current !== id) return; if (!data) { loading = false; drawDetail(); } }
+      loading = false;
       if (matchMedia('(max-width: 760px)').matches) detailEl.scrollIntoView({ block: 'start', behavior: 'smooth' });
     }
-    search.addEventListener('input', drawList);
-    document.addEventListener('langchange', () => { drawList(); drawDetail(); });
+    search.addEventListener('input', frame(drawList));
+
+    // ---- troops: one list per troop, picker only shown when there is more than one ----
+    const troopLabel = (x) => (state.lang === 'ar' ? x.name_ar : x.name_en);
+    function drawPicker() {
+      picker.replaceChildren(...troops.map((x) => el('option', { value: String(x.id) }, troopLabel(x))));
+      picker.value = String(troop);
+      picker.setAttribute('aria-label', t('troop_picker'));
+      picker.classList.toggle('hidden', troops.length < 2);
+    }
+    const listCache = (id) => { try { return JSON.parse(localStorage.getItem('scouts_cache_' + id)) || []; } catch { return []; } };
+    async function loadList(id) {
+      const l = await api('/api/scouts?troop=' + id);
+      try { localStorage.setItem('scouts_cache_' + id, JSON.stringify(l)); } catch { /* storage full */ }
+      return l;
+    }
+    async function switchTroop(id, keepScout) {
+      troop = id; try { localStorage.setItem('troop', id); } catch { /* ignore */ }
+      picker.value = String(id);
+      if (!keepScout) { current = null; data = null; loading = false; history.replaceState(null, '', location.pathname); drawDetail(); }
+      scouts = listCache(id);
+      if (scouts.length) drawList(); else listEl.replaceChildren(el('li', { class: 'empty', style: 'padding:.75rem .5rem' }, t('loading')));
+      const fresh = await loadList(id).catch(() => null);
+      if (troop !== id) return; // the visitor already picked another troop
+      if (fresh && JSON.stringify(fresh) !== JSON.stringify(scouts)) scouts = fresh;
+      drawList();
+    }
+    picker.addEventListener('change', () => switchTroop(Number(picker.value)));
+    document.addEventListener('langchange', () => { if (troops.length) drawPicker(); drawList(); drawDetail(); });
 
     (async () => {
+      // show the last list we saw immediately, then swap in the fresh one (no empty screen on repeat visits)
+      const saved = parseInt(localStorage.getItem('troop'), 10) || null; // the troop this visitor looked at last time
+      const troopsReq = api('/api/troops').catch(() => []);
+      const freshReq = saved ? loadList(saved).catch(() => null) : null; // start loading it now, in parallel
       await initLang();
-      scouts = await api('/api/scouts');
+      if (saved && listCache(saved).length) { troop = saved; scouts = listCache(saved); drawList(); }
+      troops = await troopsReq;
+      const want = troops.some((x) => x.id === saved) ? saved : troops[0]?.id;
+      if (want) { troop = want; drawPicker(); }
+      const fresh = want === saved && freshReq ? await freshReq : want ? await loadList(want).catch(() => null) : [];
+      scouts = fresh || (want === saved ? scouts : []);
       drawList();
       const id = parseInt(location.hash.slice(1), 10);
       if (id) openScout(id); else drawDetail();
