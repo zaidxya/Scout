@@ -53,7 +53,7 @@ const date = (v) => {
 };
 
 // ---- troop themes: the visual identity a troop's leaders see after signing in (the main site stays purple) ----
-const THEME_KEYS = ['default', 'rovers', 'forest', 'ocean', 'yellow', 'red', 'pink', 'white'];
+const THEME_KEYS = ['default', 'rovers', 'forest', 'forest_girls', 'ocean', 'yellow', 'yellow_hannabies', 'red', 'pink', 'white'];
 // what a troop's leaders see after signing in: the theme plus the optional text next to the logo
 const troopLook = async (troopId) => {
   const r = (await pool.query('SELECT theme, brand_en, brand_ar FROM troops WHERE id = $1', [troopId])).rows[0] || {};

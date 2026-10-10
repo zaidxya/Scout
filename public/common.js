@@ -6,14 +6,16 @@ const state = { lang: 'ar', dict: {} };
 const THEMES = {
   default: { logo: '/logo-mark.png', wordmark: false, color: '#671e93' },
   rovers: { logo: '/logo.jpg', wordmark: true, color: '#4a0313' },
-  forest: { logo: '/logo-mark.png', wordmark: false, color: '#1d5c3f' },
+  forest: { logo: '/logo-mark.png', wordmark: false, color: '#1d5c3f' }, // Forest (boys)
+  forest_girls: { logo: '/logo-mark.png', wordmark: false, color: '#1d5c3f' },
   ocean: { logo: '/logo-guides.png', wordmark: false, color: '#14507a' },
-  yellow: { logo: '/logo-cubs.png', onWhite: true, wordmark: false, color: '#f6c21c' },
+  yellow: { logo: '/logo-cubs.png', onWhite: true, wordmark: false, color: '#f6c21c' }, // Yellow (cubs)
+  yellow_hannabies: { logo: '/logo-hannabies.png', onWhite: true, wordmark: false, color: '#f6c21c' },
   red: { logo: '/logo-mark.png', wordmark: false, color: '#c62828' },
   pink: { logo: '/logo-mark.png', wordmark: false, color: '#c2386f' },
   white: { logo: '/logo-mark-dark.png', wordmark: false, color: '#ffffff' },
 };
-const look = { theme: 'default', brand: null }; // brand = { en, ar } custom text next to the logo (null = the site name)
+const look = { theme: 'default', brand: null, title: null }; // title = { en, ar }: the troop's name shown as the tab title in the leader area (null = the site name) // brand = { en, ar } custom text next to the logo (null = the site name)
 // the text next to the logo: the troop's own text if it has one, otherwise the site name
 function paintBrand() {
   const brand = document.querySelector('header .brand'); if (!brand) return;
@@ -21,14 +23,20 @@ function paintBrand() {
   brand.querySelector('span').textContent = custom || t('title');
   brand.classList.toggle('notext', !custom && !!(THEMES[look.theme] || {}).wordmark); // a wordmark logo already says the name
 }
-function applyTheme(key, brand) {
+// the browser tab title: the troop's name inside a troop's leader area, otherwise the page's own title
+function paintTitle() {
+  const own = look.title && (state.lang === 'ar' ? look.title.ar || look.title.en : look.title.en || look.title.ar);
+  document.title = own || t(document.documentElement.dataset.title || 'title');
+}
+function applyTheme(key, brand, title) {
   const th = THEMES[key] || THEMES.default;
   look.theme = THEMES[key] ? key : 'default';
   look.brand = brand && (brand.en || brand.ar) ? brand : null;
+  look.title = title && (title.en || title.ar) ? title : null;
   if (look.theme !== 'default') document.documentElement.dataset.theme = look.theme; else delete document.documentElement.dataset.theme;
   const el = document.querySelector('header .brand');
   if (el) { el.classList.toggle('wordmark', th.wordmark); const img = el.querySelector('img'); img.src = th.logo; img.classList.toggle('on-white', !!th.onWhite); }
-  paintBrand();
+  paintBrand(); paintTitle();
   const meta = document.querySelector('meta[name=theme-color]');
   if (meta) meta.content = th.color;
 }
@@ -57,10 +65,9 @@ async function setLang(l) {
   localStorage.setItem('lang', l);
   document.documentElement.lang = l;
   document.documentElement.dir = 'rtl'; // layout stays right-to-left in both languages
-  document.title = t(document.documentElement.dataset.title || 'title'); // each page sets its own title key
   document.querySelectorAll('[data-i18n]').forEach((e) => (e.textContent = t(e.dataset.i18n)));
   document.querySelectorAll('[data-i18n-ph]').forEach((e) => (e.placeholder = t(e.dataset.i18nPh)));
-  paintBrand();
+  paintBrand(); paintTitle(); // each page sets its own title key; the leader area uses the troop's name
   document.dispatchEvent(new Event('langchange'));
   if (document.fonts && !document.body.classList.contains('ready')) await fontsReady();
   showPage();

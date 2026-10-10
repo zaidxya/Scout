@@ -20,8 +20,8 @@
   --bg: #f8f2e9; --paper: #fffdf9;
   --ink: #2b0a12; --ink-rgb: 43,10,18; --muted: #7b6169; --line: #e3d5c2;
 }
-/* troop theme: Forest */
-:root[data-theme=forest] {
+/* troop themes: Forest (boys) and Forest (girls; same colors for now, own key so it can be customised) */
+:root[data-theme=forest], :root[data-theme=forest_girls] {
   --ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%231d5c3f' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z'/%3E%3C/svg%3E");
   --primary: #1d5c3f; --primary-hover: #2b7753; --primary-rgb: 29,92,63;
   --on-primary: #f6f0d9; --on-primary-rgb: 246,240,217;
@@ -38,8 +38,8 @@
   --bg: #f3f8fb; --paper: #fbfdfe;
   --ink: #0d2233; --ink-rgb: 13,34,51; --muted: #5c7384; --line: #d3e2ec;
 }
-/* troop theme: Yellow (bright yellow header, deep gold buttons) */
-:root[data-theme=yellow] {
+/* troop themes: Yellow (cubs) and Yellow (hannabies): bright yellow header, deep gold buttons (key: yellow / yellow_hannabies) */
+:root[data-theme=yellow], :root[data-theme=yellow_hannabies] {
   --ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a86f00' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z'/%3E%3C/svg%3E");
   --primary: #a86f00; --primary-hover: #c28500; --primary-rgb: 168,111,0;
   --on-primary: #fff8dc; --on-primary-rgb: 255,248,220;
@@ -47,7 +47,7 @@
   --bg: #fffaea; --paper: #fffef9;
   --ink: #2b2100; --ink-rgb: 43,33,0; --muted: #7a6a3a; --line: #efe2b4;
 }
-:root[data-theme=yellow] header { --primary: #f6c21c; --on-primary: #2b1f00; --on-primary-rgb: 43,31,0; }
+:root[data-theme=yellow] header, :root[data-theme=yellow_hannabies] header { --primary: #f6c21c; --on-primary: #2b1f00; --on-primary-rgb: 43,31,0; }
 /* troop theme: Red */
 :root[data-theme=red] {
   --ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23c62828' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z'/%3E%3C/svg%3E");

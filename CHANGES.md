@@ -180,3 +180,15 @@ The English labels were left as they were (for example "Dashboard" and "Leader a
 - **New troops:** the Add a troop form has a *Start with the activities and roles/tags of* choice: start empty, or copy another troop's lists (a one-time copy; the two lists are independent afterwards).
 - **Activity log:** shows the troop you are working in; the super admin also sees entries that belong to no troop (adding, renaming and deleting troops).
 - Files touched: `schema.sql`, `server.js`, `public/common.js`, `public/leader.html`, `public/style.css`, `public/i18n/en.json`, `public/i18n/ar.json`, `README.md`.
+
+## Theme split and renames
+- **Yellow** is now two themes: *Yellow (cubs)* (the existing one, key `yellow`, so troops already using it are unchanged) and *Yellow (hannabies)* (new, key `yellow_hannabies`) with the gold fleur-de-lis logo (`public/logo-hannabies.png`, cut out from the image you sent and shown on the same white round badge).
+- **Forest** is now *Forest (boys)* (existing, key `forest`) and *Forest (girls)* (new, key `forest_girls`). Both look identical for now; the girls theme has its own key, so its colors and logo can be changed later in `style.css` and `THEMES` in `common.js`.
+- **Aqua** is renamed *Aqua (guides)* (key still `ocean`). Rovers is unchanged.
+- Names are updated in English and Arabic; no database change is needed.
+
+## Tab icon and titles
+- **Tab icon:** the icon is now always the purple main-site logo, on every page and in every troop theme. It was served under a name browsers had cached from the old Rovers version, so it now has a new file name (`favicon-v2.png`, also used as the phone home-screen icon). If an old icon still shows, close the tab and reopen the site once.
+- **Site name:** Arabic is now كشاف الفوج الثاني (header text on the main site, dashboard and login page titles); English stays Scout Troop 2.
+- **Troop name as tab title:** inside the leader area the browser tab shows the name of the troop you are working in (in the chosen language), following the troop switcher for the super admin. On the public dashboard and the login screen it shows the site name.
+
