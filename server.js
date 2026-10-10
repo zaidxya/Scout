@@ -52,6 +52,16 @@ const date = (v) => {
   return s;
 };
 
+// ---- troop themes: the visual identity a troop's leaders see after signing in (the main site stays purple) ----
+const THEME_KEYS = ['default', 'rovers', 'forest', 'ocean', 'yellow', 'red', 'pink', 'white'];
+// what a troop's leaders see after signing in: the theme plus the optional text next to the logo
+const troopLook = async (troopId) => {
+  const r = (await pool.query('SELECT theme, brand_en, brand_ar FROM troops WHERE id = $1', [troopId])).rows[0] || {};
+  return { theme: r.theme || 'default', brand_en: r.brand_en || null, brand_ar: r.brand_ar || null };
+};
+const brandOf = (b) => [text(b?.brand_en, 40), text(b?.brand_ar, 40)];
+const themeOf = (b) => { const k = b?.theme ?? 'default'; if (!THEME_KEYS.includes(k)) throw invalid(); return k; };
+
 // ---- auth ----
 const requireLeader = wrap(async (req, res, next) => {
   let p;
@@ -59,15 +69,26 @@ const requireLeader = wrap(async (req, res, next) => {
   const { rows } = await pool.query('SELECT id, username, role, troop_id FROM leaders WHERE id = $1', [p.id]);
   if (!rows[0]) return bad(res, 'unauthorized', 401); // e.g. leader was deleted
   req.leader = rows[0];
+  // the troop this request works on: a leader's own troop; the super admin is not bound to one and picks it
+  // with the X-Troop header (an unknown or missing value falls back to the first troop)
+  req.troop = req.leader.troop_id;
+  if (req.leader.role === 'super_admin') {
+    const want = parseInt(req.get('x-troop'), 10);
+    req.troop = (await pool.query(
+      'SELECT COALESCE((SELECT id FROM troops WHERE id = $1), (SELECT MIN(id) FROM troops)) AS id', [Number.isInteger(want) ? want : null])).rows[0].id;
+  }
   next();
 });
 // only the super admin and admins may manage leader accounts
 const isAdmin = (l) => l.role === 'super_admin' || l.role === 'admin';
 const requireAdmin = (req, res, next) => (isAdmin(req.leader) ? next() : bad(res, 'forbidden', 403));
-// the super admin alone: troops, the shared activity list, and the shared roles/tags
+// the super admin alone: the troops themselves
 const isSuper = (l) => l.role === 'super_admin';
 const requireSuper = (req, res, next) => (isSuper(req.leader) ? next() : bad(res, 'forbidden', 403));
-// which troop's data a leader may touch: their own troop, or every troop (null) for the super admin
+// who edits a troop's own activity list and roles/tags (everyone can read them): for now only the super admin,
+// working in whichever troop they have switched to. To let each troop's admins manage their own lists, change this to requireAdmin.
+const requireListEditor = requireSuper;
+// which troops' scouts a leader may touch: their own troop, or every troop (null) for the super admin
 const troopScope = (l) => (isSuper(l) ? null : l.troop_id);
 // may `actor` delete / reset the password of `target`? (never the super admin; admins only manage plain leaders of their own troop)
 const canManage = (actor, target) => target.id !== actor.id && target.role !== 'super_admin'
@@ -118,7 +139,7 @@ app.post('/api/login', loginLimiter, wrap(async (req, res) => {
   res.cookie('token', token, {
     httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 12 * 60 * 60 * 1000,
   });
-  res.json({ username: leader.username, role: leader.role, troop_id: leader.troop_id });
+  res.json({ username: leader.username, role: leader.role, troop_id: leader.troop_id, ...(await troopLook(leader.troop_id)) });
 }));
 
 app.post('/api/logout', wrap(async (req, res) => {
@@ -130,7 +151,7 @@ app.post('/api/logout', wrap(async (req, res) => {
   res.clearCookie('token');
   res.json({ ok: true });
 }));
-app.get('/api/me', requireLeader, (req, res) => res.json({ username: req.leader.username, role: req.leader.role, troop_id: req.leader.troop_id }));
+app.get('/api/me', requireLeader, wrap(async (req, res) => res.json({ username: req.leader.username, role: req.leader.role, troop_id: req.leader.troop_id, ...(await troopLook(req.leader.troop_id)) })));
 
 app.put('/api/me/password', requireLeader, wrap(async (req, res) => {
   const { current, next } = req.body || {};
@@ -149,7 +170,7 @@ const ROLES_JSON = `COALESCE((SELECT json_agg(json_build_object('id', l.id, 'nam
 
 // ---- troops (names are public so the dashboard can offer a troop picker) ----
 app.get('/api/troops', wrap(async (req, res) => {
-  res.json((await pool.query('SELECT id, name_en, name_ar FROM troops ORDER BY id')).rows);
+  res.json((await pool.query("SELECT id, name_en, name_ar, COALESCE(theme, 'default') AS theme, brand_en, brand_ar FROM troops ORDER BY id")).rows);
 }));
 
 const troopNames = (b) => {
@@ -159,15 +180,25 @@ const troopNames = (b) => {
 };
 app.post('/api/troops', requireLeader, requireSuper, wrap(async (req, res) => {
   const [en, ar] = troopNames(req.body);
-  const { rows } = await pool.query('INSERT INTO troops (name_en, name_ar) VALUES ($1,$2) RETURNING id, name_en, name_ar', [en, ar]);
-  audit(req.leader, 'troop_add', { name: en }, rows[0].id);
-  res.status(201).json(rows[0]);
+  const [bEn, bAr] = brandOf(req.body);
+  const copyFrom = req.body?.copy_from ? intId(req.body.copy_from) : null; // optionally start with a copy of another troop's activities and roles/tags
+  const row = await tx(async (c) => {
+    const { rows } = await c.query('INSERT INTO troops (name_en, name_ar, theme, brand_en, brand_ar) VALUES ($1,$2,$3,$4,$5) RETURNING id, name_en, name_ar, theme, brand_en, brand_ar', [en, ar, themeOf(req.body), bEn, bAr]);
+    if (copyFrom) {
+      await c.query('INSERT INTO activities (name_en, name_ar, xp, troop_id) SELECT name_en, name_ar, xp, $1 FROM activities WHERE troop_id = $2 ORDER BY id', [rows[0].id, copyFrom]);
+      await c.query('INSERT INTO labels (kind, name_en, name_ar, color, priority, troop_id) SELECT kind, name_en, name_ar, color, priority, $1 FROM labels WHERE troop_id = $2 ORDER BY id', [rows[0].id, copyFrom]);
+    }
+    return rows[0];
+  });
+  audit(req.leader, 'troop_add', { name: en }, row.id);
+  res.status(201).json(row);
 }));
 app.put('/api/troops/:id', requireLeader, requireSuper, wrap(async (req, res) => {
   const [en, ar] = troopNames(req.body);
-  const r = await pool.query('UPDATE troops SET name_en = $1, name_ar = $2 WHERE id = $3', [en, ar, intId(req.params.id)]);
+  const [bEn, bAr] = brandOf(req.body);
+  const r = await pool.query('UPDATE troops SET name_en = $1, name_ar = $2, theme = $3, brand_en = $4, brand_ar = $5 WHERE id = $6', [en, ar, themeOf(req.body), bEn, bAr, intId(req.params.id)]);
   if (!r.rowCount) return bad(res, 'not_found', 404);
-  audit(req.leader, 'troop_update', { name: en });
+  audit(req.leader, 'troop_update', { name: en }, intId(req.params.id));
   res.json({ ok: true });
 }));
 // a troop can only be deleted once it has no scouts and no leader accounts
@@ -176,7 +207,7 @@ app.delete('/api/troops/:id', requireLeader, requireSuper, wrap(async (req, res)
   const used = await pool.query('SELECT (SELECT COUNT(*) FROM scouts WHERE troop_id = $1) + (SELECT COUNT(*) FROM leaders WHERE troop_id = $1) AS n', [id]);
   if (Number(used.rows[0].n) > 0) return bad(res, 'troop_not_empty', 409);
   const { rows } = await pool.query('DELETE FROM troops WHERE id = $1 RETURNING name_en', [id]);
-  if (rows[0]) audit(req.leader, 'troop_delete', { name: rows[0].name_en });
+  if (rows[0]) audit(req.leader, 'troop_delete', { name: rows[0].name_en }, null);
   res.json({ ok: true });
 }));
 
@@ -218,44 +249,44 @@ app.get('/api/leader/scouts', requireLeader, wrap(async (req, res) => {
        EXISTS (SELECT 1 FROM leaders l WHERE l.scout_id = s.id) AS is_leader,
        COALESCE((SELECT json_agg(sl.label_id) FROM scout_labels sl WHERE sl.scout_id = s.id), '[]'::json) AS label_ids
      FROM scouts s LEFT JOIN (SELECT scout_id, SUM(xp) AS total FROM xp_log GROUP BY scout_id) x ON x.scout_id = s.id
-     WHERE ($1::int IS NULL OR s.troop_id = $1)
+     WHERE s.troop_id = $1
      ORDER BY (SELECT COALESCE(MAX(l.priority), 0) FROM scout_labels sl JOIN labels l ON l.id = sl.label_id AND l.kind = 'role' WHERE sl.scout_id = s.id) DESC, total_xp DESC, s.name`,
-    [troopScope(req.leader)]);
+    [req.troop]);
   res.json(rows);
 }));
 
-// ---- leader: roles and tags ----
+// ---- leader: roles and tags (each troop has its own set; everyone reads their troop's, only list editors change them) ----
 app.get('/api/labels', requireLeader, wrap(async (req, res) => {
-  const { rows } = await pool.query('SELECT id, kind, name_en, name_ar, color, priority FROM labels ORDER BY kind, priority DESC, name_en, id');
+  const { rows } = await pool.query('SELECT id, kind, name_en, name_ar, color, priority FROM labels WHERE troop_id = $1 ORDER BY kind, priority DESC, name_en, id', [req.troop]);
   res.json(rows);
 }));
 
-app.post('/api/labels', requireLeader, requireSuper, wrap(async (req, res) => {
+app.post('/api/labels', requireLeader, requireListEditor, wrap(async (req, res) => {
   const kind = req.body?.kind;
   const en = text(req.body?.name_en, 40), ar = text(req.body?.name_ar, 40);
   if (!['role', 'tag'].includes(kind) || (!en && !ar)) throw invalid();
   const { rows } = await pool.query(
-    'INSERT INTO labels (kind, name_en, name_ar, color, priority) VALUES ($1,$2,$3,$4,$5) RETURNING id, kind, name_en, name_ar, color, priority',
-    [kind, en || ar, ar || en, hexColor(req.body?.color), kind === 'role' ? priority(req.body?.priority) : 0]);
-  audit(req.leader, 'label_add', { name: `${en || ar} (${kind})` });
+    'INSERT INTO labels (kind, name_en, name_ar, color, priority, troop_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, kind, name_en, name_ar, color, priority',
+    [kind, en || ar, ar || en, hexColor(req.body?.color), kind === 'role' ? priority(req.body?.priority) : 0, req.troop]);
+  audit(req.leader, 'label_add', { name: `${en || ar} (${kind})` }, req.troop);
   res.status(201).json(rows[0]);
 }));
 
-app.put('/api/labels/:id', requireLeader, requireSuper, wrap(async (req, res) => {
+app.put('/api/labels/:id', requireLeader, requireListEditor, wrap(async (req, res) => {
   const b = req.body || {}, sets = [], vals = [];
   if ('color' in b) { vals.push(hexColor(b.color)); sets.push(`color = $${vals.length}`); }
   if ('priority' in b) { vals.push(priority(b.priority)); sets.push(`priority = $${vals.length}`); }
   if (!sets.length) throw invalid();
-  vals.push(intId(req.params.id));
-  const { rows } = await pool.query(`UPDATE labels SET ${sets.join(', ')} WHERE id = $${vals.length} RETURNING name_en, kind`, vals);
+  vals.push(intId(req.params.id), req.troop);
+  const { rows } = await pool.query(`UPDATE labels SET ${sets.join(', ')} WHERE id = $${vals.length - 1} AND troop_id = $${vals.length} RETURNING name_en, kind`, vals);
   if (!rows[0]) return bad(res, 'not_found', 404);
-  audit(req.leader, 'label_update', { name: `${rows[0].name_en} (${rows[0].kind})` });
+  audit(req.leader, 'label_update', { name: `${rows[0].name_en} (${rows[0].kind})` }, req.troop);
   res.json({ ok: true });
 }));
 
-app.delete('/api/labels/:id', requireLeader, requireSuper, wrap(async (req, res) => {
-  const { rows } = await pool.query('DELETE FROM labels WHERE id = $1 RETURNING name_en, kind', [intId(req.params.id)]);
-  if (rows[0]) audit(req.leader, 'label_delete', { name: `${rows[0].name_en} (${rows[0].kind})` });
+app.delete('/api/labels/:id', requireLeader, requireListEditor, wrap(async (req, res) => {
+  const { rows } = await pool.query('DELETE FROM labels WHERE id = $1 AND troop_id = $2 RETURNING name_en, kind', [intId(req.params.id), req.troop]);
+  if (rows[0]) audit(req.leader, 'label_delete', { name: `${rows[0].name_en} (${rows[0].kind})` }, req.troop);
   res.json({ ok: true });
 }));
 
@@ -270,7 +301,7 @@ app.put('/api/scouts/:id/labels', requireLeader, wrap(async (req, res) => {
   await tx(async (c) => {
     await c.query('DELETE FROM scout_labels WHERE scout_id = $1', [id]);
     if (labelIds.length) await c.query(
-      'INSERT INTO scout_labels (scout_id, label_id) SELECT $1::int, id FROM labels WHERE id = ANY($2::int[])', [id, labelIds]);
+      'INSERT INTO scout_labels (scout_id, label_id) SELECT $1::int, id FROM labels WHERE id = ANY($2::int[]) AND troop_id = $3', [id, labelIds, sc.troop_id]);
   });
   audit(req.leader, 'labels_set', { name: sc.name }, sc.troop_id);
   res.json({ ok: true });
@@ -300,11 +331,9 @@ app.get('/api/leader/scouts/:id', requireLeader, wrap(async (req, res) => {
 app.post('/api/scouts', requireLeader, wrap(async (req, res) => {
   const name = text(req.body?.name, 60);
   if (!name) throw invalid();
-  // leaders add scouts to their own troop; the super admin picks the troop
-  const troop = isSuper(req.leader) ? intId(req.body?.troop_id ?? req.leader.troop_id) : req.leader.troop_id;
-  let rows;
-  try { ({ rows } = await pool.query('INSERT INTO scouts (name, troop_id) VALUES ($1, $2) RETURNING id, name', [name, troop])); }
-  catch (e) { if (e.code === '23503') throw invalid(); throw e; } // no such troop
+  // scouts are added to the troop being worked on (a leader's own, or the one the super admin switched to)
+  const troop = req.troop;
+  const { rows } = await pool.query('INSERT INTO scouts (name, troop_id) VALUES ($1, $2) RETURNING id, name', [name, troop]);
   audit(req.leader, 'scout_add', { name }, troop);
   res.status(201).json(rows[0]);
 }));
@@ -364,10 +393,11 @@ app.post('/api/scouts/:id/xp', requireLeader, wrap(async (req, res) => {
   const note = text(req.body?.note, 200);
   const day = date(req.body?.date);
   if (day && Date.parse(day) > Date.now() + 2 * 86400000) throw invalid(); // no dates in the future
-  const a = await pool.query('SELECT * FROM activities WHERE id = $1', [intId(req.body?.activity_id)]);
-  if (!a.rows[0]) return bad(res, 'not_found', 404);
+  const activityId = intId(req.body?.activity_id);
   const sc = await scoutFor(req, id);
   if (!sc) return bad(res, 'not_found', 404);
+  const a = await pool.query('SELECT * FROM activities WHERE id = $1 AND troop_id = $2', [activityId, sc.troop_id]); // each troop only uses its own activities
+  if (!a.rows[0]) return bad(res, 'not_found', 404);
   const act = a.rows[0];
   await pool.query(
     `INSERT INTO xp_log (scout_id, activity, activity_ar, activity_id, xp, note, leader_id, activity_date)
@@ -385,25 +415,25 @@ app.delete('/api/xp/:id', requireLeader, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-// ---- activity list: shared by every troop; leaders read it, only the super admin changes it ----
+// ---- activity list: each troop has its own; leaders read their troop's, only list editors change it ----
 app.get('/api/activities', requireLeader, wrap(async (req, res) => {
-  const { rows } = await pool.query('SELECT id, name_en, name_ar, xp FROM activities ORDER BY xp, id');
+  const { rows } = await pool.query('SELECT id, name_en, name_ar, xp FROM activities WHERE troop_id = $1 ORDER BY xp, id', [req.troop]);
   res.json(rows);
 }));
 
-app.post('/api/activities', requireLeader, requireSuper, wrap(async (req, res) => {
+app.post('/api/activities', requireLeader, requireListEditor, wrap(async (req, res) => {
   const en = text(req.body?.name_en, 60), ar = text(req.body?.name_ar, 60);
   const xp = Number(req.body?.xp);
   if ((!en && !ar) || !Number.isInteger(xp) || xp === 0 || xp < -10000 || xp > 10000) throw invalid();
   const { rows } = await pool.query(
-    'INSERT INTO activities (name_en, name_ar, xp) VALUES ($1, $2, $3) RETURNING id', [en || ar, ar || en, xp]);
-  audit(req.leader, 'activity_add', { name_en: en || ar, name_ar: ar || en, xp });
+    'INSERT INTO activities (name_en, name_ar, xp, troop_id) VALUES ($1, $2, $3, $4) RETURNING id', [en || ar, ar || en, xp, req.troop]);
+  audit(req.leader, 'activity_add', { name_en: en || ar, name_ar: ar || en, xp }, req.troop);
   res.status(201).json(rows[0]);
 }));
 
-app.delete('/api/activities/:id', requireLeader, requireSuper, wrap(async (req, res) => {
-  const { rows } = await pool.query('DELETE FROM activities WHERE id = $1 RETURNING name_en, name_ar', [intId(req.params.id)]);
-  if (rows[0]) audit(req.leader, 'activity_delete', rows[0]);
+app.delete('/api/activities/:id', requireLeader, requireListEditor, wrap(async (req, res) => {
+  const { rows } = await pool.query('DELETE FROM activities WHERE id = $1 AND troop_id = $2 RETURNING name_en, name_ar', [intId(req.params.id), req.troop]);
+  if (rows[0]) audit(req.leader, 'activity_delete', rows[0], req.troop);
   res.json({ ok: true });
 }));
 
@@ -413,8 +443,8 @@ app.get('/api/leaders', requireLeader, requireAdmin, wrap(async (req, res) => {
     `SELECT l.id, l.username, l.role, l.created_at, l.scout_id, l.troop_id, s.name AS scout_name,
             t.name_en AS troop_name_en, t.name_ar AS troop_name_ar
      FROM leaders l LEFT JOIN scouts s ON s.id = l.scout_id LEFT JOIN troops t ON t.id = l.troop_id
-     WHERE ($1::int IS NULL OR l.troop_id = $1)
-     ORDER BY (l.role = 'super_admin') DESC, (l.role = 'admin') DESC, l.troop_id, l.id`, [troopScope(req.leader)]);
+     WHERE l.troop_id = $1 OR ($2::boolean AND l.role = 'super_admin')
+     ORDER BY (l.role = 'super_admin') DESC, (l.role = 'admin') DESC, l.id`, [req.troop, isSuper(req.leader)]);
   res.json(rows.map((r) => ({ ...r, can_manage: canManage(req.leader, r) })));
 }));
 
@@ -426,8 +456,8 @@ app.post('/api/leaders', requireLeader, requireAdmin, wrap(async (req, res) => {
   const role = req.body?.role === 'admin' ? 'admin' : 'leader';
   if (role === 'admin' && req.leader.role !== 'super_admin') return bad(res, 'forbidden', 403); // only the super admin creates admins
   const display = text(req.body?.display_name, 60) || username;
-  // admins add leaders to their own troop; the super admin picks the troop
-  const troop = isSuper(req.leader) ? intId(req.body?.troop_id ?? req.leader.troop_id) : req.leader.troop_id;
+  // new accounts join the troop being worked on (an admin's own, or the one the super admin switched to)
+  const troop = req.troop;
   try {
     // one statement: creates the leader's scout profile and the leader together (or neither)
     const { rows } = await pool.query(
@@ -471,7 +501,7 @@ app.get('/api/audit', requireLeader, requireAdmin, wrap(async (req, res) => {
   const { rows } = await pool.query(
     `SELECT a.id, a.leader_name, a.action, a.meta, a.created_at, a.troop_id, t.name_en AS troop_name_en, t.name_ar AS troop_name_ar
      FROM audit_log a LEFT JOIN troops t ON t.id = a.troop_id
-     WHERE ($1::int IS NULL OR a.troop_id = $1) ORDER BY a.id DESC LIMIT 300`, [troopScope(req.leader)]);
+     WHERE a.troop_id = $1 OR ($2::boolean AND a.troop_id IS NULL) ORDER BY a.id DESC LIMIT 300`, [req.troop, isSuper(req.leader)]);
   res.json(rows);
 }));
 
@@ -490,19 +520,49 @@ app.use((err, req, res, next) => {
     firstTroop = (await pool.query("INSERT INTO troops (name_en, name_ar) VALUES ('Rovers', 'الجوالة') RETURNING id")).rows[0].id;
     console.log('Created the first troop "Rovers" (rename it in the Troops tab)');
   }
-  for (const table of ['scouts', 'leaders', 'audit_log']) await pool.query(`UPDATE ${table} SET troop_id = $1 WHERE troop_id IS NULL`, [firstTroop]);
+  // the first troop is the Rovers: give it the Rovers identity unless a theme was chosen already
+  await pool.query("UPDATE troops SET theme = 'rovers' WHERE id = $1 AND theme IS NULL", [firstTroop]);
+  await pool.query('UPDATE scouts SET troop_id = $1 WHERE troop_id IS NULL', [firstTroop]);
+  await pool.query("UPDATE leaders SET troop_id = $1 WHERE troop_id IS NULL AND role <> 'super_admin'", [firstTroop]); // the super admin is not bound to a troop
+  await pool.query('UPDATE audit_log SET troop_id = $1 WHERE troop_id IS NULL AND leader_id IN (SELECT id FROM leaders WHERE role <> \'super_admin\')', [firstTroop]);
   await pool.query('ALTER TABLE scouts ALTER COLUMN troop_id SET NOT NULL');
-  await pool.query('ALTER TABLE leaders ALTER COLUMN troop_id SET NOT NULL');
+  await pool.query('ALTER TABLE leaders VALIDATE CONSTRAINT leaders_troop_check');
+  // activities and roles/tags used to be one list shared by every troop: give each troop its own copy.
+  // The existing list stays with the first troop; every other troop gets a copy, and its scouts' XP entries
+  // and role/tag assignments are pointed at that copy, so nothing changes for anyone. Runs once.
+  const loose = await pool.query('SELECT (SELECT COUNT(*) FROM activities WHERE troop_id IS NULL) + (SELECT COUNT(*) FROM labels WHERE troop_id IS NULL) AS n');
+  if (Number(loose.rows[0].n) > 0) {
+    await tx(async (c) => {
+      const others = (await c.query('SELECT id FROM troops WHERE id <> $1 ORDER BY id', [firstTroop])).rows;
+      const acts = (await c.query('SELECT id, name_en, name_ar, xp FROM activities WHERE troop_id IS NULL ORDER BY id')).rows;
+      const labs = (await c.query('SELECT id, kind, name_en, name_ar, color, priority FROM labels WHERE troop_id IS NULL ORDER BY id')).rows;
+      for (const { id: tid } of others) {
+        for (const a of acts) {
+          const n = (await c.query('INSERT INTO activities (name_en, name_ar, xp, troop_id) VALUES ($1,$2,$3,$4) RETURNING id', [a.name_en, a.name_ar, a.xp, tid])).rows[0].id;
+          await c.query('UPDATE xp_log SET activity_id = $1 WHERE activity_id = $2 AND scout_id IN (SELECT id FROM scouts WHERE troop_id = $3)', [n, a.id, tid]);
+        }
+        for (const l of labs) {
+          const n = (await c.query('INSERT INTO labels (kind, name_en, name_ar, color, priority, troop_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id', [l.kind, l.name_en, l.name_ar, l.color, l.priority, tid])).rows[0].id;
+          await c.query('UPDATE scout_labels SET label_id = $1 WHERE label_id = $2 AND scout_id IN (SELECT id FROM scouts WHERE troop_id = $3)', [n, l.id, tid]);
+        }
+      }
+      await c.query('UPDATE activities SET troop_id = $1 WHERE troop_id IS NULL', [firstTroop]);
+      await c.query('UPDATE labels SET troop_id = $1 WHERE troop_id IS NULL', [firstTroop]);
+    });
+    console.log('Gave every troop its own activities and roles/tags');
+  }
+  await pool.query('ALTER TABLE activities ALTER COLUMN troop_id SET NOT NULL');
+  await pool.query('ALTER TABLE labels ALTER COLUMN troop_id SET NOT NULL');
   const acts = await pool.query('SELECT COUNT(*)::int AS n FROM activities');
   if (acts.rows[0].n === 0) {
     await pool.query(
-      `INSERT INTO activities (name_en, name_ar, xp) VALUES ('Presence','حضور',5), ('Idea','فكرة',3), ('Event','فعالية',10)`);
+      `INSERT INTO activities (name_en, name_ar, xp, troop_id) VALUES ('Presence','حضور',5,$1), ('Idea','فكرة',3,$1), ('Event','فعالية',10,$1)`, [firstTroop]);
   }
   const { rows } = await pool.query('SELECT COUNT(*)::int AS n FROM leaders');
   const { LEADER_USERNAME, LEADER_PASSWORD } = process.env;
   if (rows[0].n === 0 && LEADER_USERNAME && LEADER_PASSWORD) {
-    await pool.query("INSERT INTO leaders (username, password_hash, role, troop_id) VALUES ($1, $2, 'super_admin', $3)",
-      [LEADER_USERNAME.trim().toLowerCase(), await bcrypt.hash(LEADER_PASSWORD, 12), firstTroop]);
+    await pool.query("INSERT INTO leaders (username, password_hash, role, troop_id) VALUES ($1, $2, 'super_admin', NULL)",
+      [LEADER_USERNAME.trim().toLowerCase(), await bcrypt.hash(LEADER_PASSWORD, 12)]);
     console.log(`Created first leader (super admin) "${LEADER_USERNAME}"`);
   }
   // make sure exactly one super admin exists (covers accounts created before roles existed):
@@ -515,12 +575,14 @@ app.use((err, req, res, next) => {
       [(LEADER_USERNAME || '').trim().toLowerCase()]);
     if (r.rows[0]) console.log(`Promoted "${r.rows[0].username}" to super admin`);
   }
-  // make sure every leader has a scout profile (covers leaders created before this feature)
+  // the super admin is bound to no troop (a promoted account that used to belong to one is released); their scout profile stays where it is
+  await pool.query("UPDATE leaders SET troop_id = NULL WHERE role = 'super_admin' AND troop_id IS NOT NULL");
+  // make sure every leader has a scout profile (covers leaders created before this feature; the super admin's goes in the first troop)
   const missing = await pool.query('SELECT id, username, troop_id FROM leaders WHERE scout_id IS NULL');
   for (const l of missing.rows) {
     await pool.query(
       'WITH s AS (INSERT INTO scouts (name, troop_id) VALUES ($2, $3) RETURNING id) UPDATE leaders SET scout_id = (SELECT id FROM s) WHERE id = $1',
-      [l.id, l.username, l.troop_id]);
+      [l.id, l.username, l.troop_id ?? firstTroop]);
     console.log(`Created scout profile for leader "${l.username}"`);
   }
   const port = process.env.PORT || 3000;

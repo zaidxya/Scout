@@ -68,14 +68,20 @@ CREATE TABLE IF NOT EXISTS scout_labels (
   PRIMARY KEY (scout_id, label_id)
 );
 CREATE INDEX IF NOT EXISTS scout_labels_label_idx ON scout_labels(label_id);
--- troops: every scout and every leader account belongs to exactly one troop.
--- Activities and roles/tags stay shared by all troops (managed by the super admin).
+-- troops: every scout belongs to exactly one troop, and so does every leader account except the super admin,
+-- who is not bound to a troop and can switch between all of them.
+-- Activities and roles/tags are separate for each troop (activities.troop_id / labels.troop_id below).
 CREATE TABLE IF NOT EXISTS troops (
   id SERIAL PRIMARY KEY,
   name_en TEXT NOT NULL,
   name_ar TEXT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- visual identity shown to the troop's leaders after sign-in (NULL = main site look)
+ALTER TABLE troops ADD COLUMN IF NOT EXISTS theme TEXT;
+-- text shown next to the logo for this troop's leaders (NULL = the site name)
+ALTER TABLE troops ADD COLUMN IF NOT EXISTS brand_en TEXT;
+ALTER TABLE troops ADD COLUMN IF NOT EXISTS brand_ar TEXT;
 ALTER TABLE scouts ADD COLUMN IF NOT EXISTS troop_id INT REFERENCES troops(id);
 ALTER TABLE leaders ADD COLUMN IF NOT EXISTS troop_id INT REFERENCES troops(id);
 ALTER TABLE audit_log ADD COLUMN IF NOT EXISTS troop_id INT REFERENCES troops(id) ON DELETE SET NULL;
@@ -95,3 +101,17 @@ DO $$ BEGIN
   END IF;
 END $$;
 CREATE UNIQUE INDEX IF NOT EXISTS leaders_one_super_admin ON leaders ((true)) WHERE role = 'super_admin';
+
+-- the super admin belongs to no troop; every other account must belong to one
+ALTER TABLE leaders ALTER COLUMN troop_id DROP NOT NULL;
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'leaders_troop_check') THEN
+    ALTER TABLE leaders ADD CONSTRAINT leaders_troop_check CHECK (role = 'super_admin' OR troop_id IS NOT NULL) NOT VALID;
+  END IF;
+END $$;
+
+-- activities and roles/tags are separate for each troop (older databases had one shared list; startup copies it per troop)
+ALTER TABLE activities ADD COLUMN IF NOT EXISTS troop_id INT REFERENCES troops(id) ON DELETE CASCADE;
+ALTER TABLE labels ADD COLUMN IF NOT EXISTS troop_id INT REFERENCES troops(id) ON DELETE CASCADE;
+CREATE INDEX IF NOT EXISTS activities_troop_idx ON activities(troop_id);
+CREATE INDEX IF NOT EXISTS labels_troop_idx ON labels(troop_id);

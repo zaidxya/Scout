@@ -1,4 +1,37 @@
 const state = { lang: 'ar', dict: {} };
+
+// ---- visual identity ----
+// The main site (home dashboard, login screen) uses the purple main identity. Each troop picks a theme
+// (see the :root[data-theme=...] blocks in style.css); the leader area switches to it after sign-in.
+const THEMES = {
+  default: { logo: '/logo-mark.png', wordmark: false, color: '#671e93' },
+  rovers: { logo: '/logo.jpg', wordmark: true, color: '#4a0313' },
+  forest: { logo: '/logo-mark.png', wordmark: false, color: '#1d5c3f' },
+  ocean: { logo: '/logo-guides.png', wordmark: false, color: '#14507a' },
+  yellow: { logo: '/logo-cubs.png', onWhite: true, wordmark: false, color: '#f6c21c' },
+  red: { logo: '/logo-mark.png', wordmark: false, color: '#c62828' },
+  pink: { logo: '/logo-mark.png', wordmark: false, color: '#c2386f' },
+  white: { logo: '/logo-mark-dark.png', wordmark: false, color: '#ffffff' },
+};
+const look = { theme: 'default', brand: null }; // brand = { en, ar } custom text next to the logo (null = the site name)
+// the text next to the logo: the troop's own text if it has one, otherwise the site name
+function paintBrand() {
+  const brand = document.querySelector('header .brand'); if (!brand) return;
+  const custom = look.brand && (state.lang === 'ar' ? look.brand.ar || look.brand.en : look.brand.en || look.brand.ar);
+  brand.querySelector('span').textContent = custom || t('title');
+  brand.classList.toggle('notext', !custom && !!(THEMES[look.theme] || {}).wordmark); // a wordmark logo already says the name
+}
+function applyTheme(key, brand) {
+  const th = THEMES[key] || THEMES.default;
+  look.theme = THEMES[key] ? key : 'default';
+  look.brand = brand && (brand.en || brand.ar) ? brand : null;
+  if (look.theme !== 'default') document.documentElement.dataset.theme = look.theme; else delete document.documentElement.dataset.theme;
+  const el = document.querySelector('header .brand');
+  if (el) { el.classList.toggle('wordmark', th.wordmark); const img = el.querySelector('img'); img.src = th.logo; img.classList.toggle('on-white', !!th.onWhite); }
+  paintBrand();
+  const meta = document.querySelector('meta[name=theme-color]');
+  if (meta) meta.content = th.color;
+}
 const t = (k) => state.dict[k] || k;
 
 // each language file is downloaded once; switching back and forth reuses it
@@ -27,6 +60,7 @@ async function setLang(l) {
   document.title = t(document.documentElement.dataset.title || 'title'); // each page sets its own title key
   document.querySelectorAll('[data-i18n]').forEach((e) => (e.textContent = t(e.dataset.i18n)));
   document.querySelectorAll('[data-i18n-ph]').forEach((e) => (e.placeholder = t(e.dataset.i18nPh)));
+  paintBrand();
   document.dispatchEvent(new Event('langchange'));
   if (document.fonts && !document.body.classList.contains('ready')) await fontsReady();
   showPage();
@@ -45,7 +79,8 @@ async function api(url, method = 'GET', body) {
   const r = await fetch(url, {
     method,
     credentials: 'same-origin',
-    headers: { 'Content-Type': 'application/json' },
+    // state.troop is set in the leader area only: it tells the server which troop the super admin is working in
+    headers: { 'Content-Type': 'application/json', ...(state.troop ? { 'X-Troop': String(state.troop) } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   });
   const data = await r.json().catch(() => ({}));
@@ -77,7 +112,7 @@ function chipStyle(l) {
   if (!l.color) return '';
   const n = parseInt(l.color.slice(1), 16), r = n >> 16, g = (n >> 8) & 255, b = n & 255;
   const dark = (r * 299 + g * 587 + b * 114) / 1000 < 150;
-  return `background:${l.color};border:1px solid ${l.color};color:${dark ? '#fff' : '#2b0a12'}`;
+  return `background:${l.color};border:1px solid ${l.color};color:${dark ? '#fff' : '#26122f'}`;
 }
 function roleChips(roles) {
   return el('span', { class: 'chips' }, (roles || []).map((r) => el('span', { class: 'chip role', style: chipStyle(r) }, roleName(r))));

@@ -1,4 +1,4 @@
-# Jawlat Scout Tracker: summary of changes
+# Scout Troop 2 Scout Tracker: summary of changes
 
 All changes are in the updated `scout-app.zip`.
 
@@ -97,7 +97,7 @@ The English labels were left as they were (for example "Dashboard" and "Leader a
 - Shared chip code moved into `common.js` (`roleChips`, `chipStyle`).
 
 ## Round 6: page titles
-- The browser tab title is now "قائمة الكشاف" on the dashboard and "القيادة" in the leader area (Arabic). English titles are unchanged ("Jawlat"). Each page sets its title key with `data-title` on its `<html>` tag.
+- The browser tab title is now "قائمة الكشاف" on the dashboard and "القيادة" in the leader area (Arabic). English titles use the site name. Each page sets its title key with `data-title` on its `<html>` tag.
 
 ## Round 6: negative XP activities
 - Activities can now have a negative XP value (any whole number from -10000 to 10000 except 0). Awarding one deducts XP and shows in red in the history, the activity list and the dropdown.
@@ -159,3 +159,24 @@ The English labels were left as they were (for example "Dashboard" and "Leader a
 - **New Troops tab (super admin):** add, rename and delete troops (a troop can only be deleted when it has no scouts or leaders).
 - **Troop pickers:** the super admin gets a troop filter above the scout list and a troop choice when adding scouts and leaders; the public dashboard shows a troop picker when there is more than one troop and remembers the visitor's choice.
 - Not built yet: moving a scout to another troop, and patrols inside a troop.
+
+## Visual identities (main site + troop themes)
+- **Main site look:** the home dashboard and the leader login screen use the purple and cream of the Scout Troop 2 logo (fleur-de-lis mark + name in the header, rounded cards, pill search).
+- **Troop themes:** each troop has a `theme` (new column on `troops`, added automatically on startup). After signing in, the leader area switches to the theme of the leader's troop and goes back to purple on log out. Available: `rovers` (the original wine and sand with the wordmark logo), `forest`, `ocean`, `yellow`, `red`, `pink`, `white`. The first troop is set to `rovers` automatically.
+- **Choosing a theme:** the super admin picks a troop's theme in the Troops tab (when adding or editing a troop).
+- **Adding a new look later:** add a `:root[data-theme=name]` block in `style.css` and an entry in `THEMES` in `common.js` (and its key in `THEME_KEYS` in `server.js`).
+- The public dashboard always stays on the main purple look, whichever troop is picked.
+- **Site name:** the name shown next to the logo and in page titles is now "Scout Troop 2" in both languages (`title` keys in `public/i18n/*.json`).
+- **Text next to the logo, per troop:** each troop can have its own text (English and Arabic) next to the logo, set in the Troops tab together with the theme (new `brand_en` / `brand_ar` columns on `troops`, added automatically). Leave both empty to show the site name; a troop with a wordmark logo (Rovers) shows no text unless you set some.
+- **Role/tag colors stay the same everywhere:** roles and tags without a chosen color used to take on the active theme's colors (so the same role looked different on the main site and in a troop's leader area). They now use one fixed default look (soft sand with a dark wine label) on the main site and in every troop theme. Colors chosen in the Roles & tags tab were already identical everywhere and are unchanged.
+- **More troop themes:** Yellow (bright yellow header, deep gold buttons), Red, Pink and White (white header, charcoal buttons) join Rovers, Forest and Ocean in the "Look" picker. Yellow and White use a dark version of the fleur-de-lis (`public/logo-mark-dark.png`) so it stays visible on a light header.
+- **Section logos:** the Yellow theme now uses the Cub Scouts logo (on a white round badge so it stands out on the yellow header), and the blue theme, now labelled "Aqua", uses the Girl Guides logo. Files: `public/logo-cubs.png`, `public/logo-guides.png`. The theme key is still `ocean`, so nothing changes in the database.
+
+## Super admin across troops, separate lists per troop
+- **The super admin is not bound to a troop.** The account now has no troop of its own (`leaders.troop_id` may be empty for the super admin only; every other account must still have one). Existing databases release the super admin on the next startup. Their scout profile (they appear in the scout list like every leader) stays in the troop it was in.
+- **Troop switcher.** When there is more than one troop, the super admin gets a switcher above the tabs. Switching reloads scouts, activities, roles/tags, leaders and the activity log for that troop and puts on that troop's theme and logo text. The last troop is remembered in the browser. The old "all troops" filter and the per-form troop pickers are gone: scouts and leaders are added to the troop you are in. The server learns the chosen troop from an `X-Troop` header that only the super admin's requests can change; everyone else is always pinned to their own troop.
+- **Activities and roles/tags are separate for each troop.** New `troop_id` on `activities` and `labels`. A scout can only be awarded activities and given roles/tags from their own troop (checked on the server), and the Activities and Roles & tags tabs show the troop you are working in. Only the super admin edits them, as before; to let each troop's admins manage their own, change `requireListEditor` in `server.js` to `requireAdmin` (and show the tabs to admins).
+- **Automatic migration, runs once.** The existing shared list stays with the first troop (Rovers); every other troop gets its own copy, and its scouts' XP entries and role/tag assignments are pointed at that copy, so nothing visible changes. Deleting a troop also deletes its own lists.
+- **New troops:** the Add a troop form has a *Start with the activities and roles/tags of* choice: start empty, or copy another troop's lists (a one-time copy; the two lists are independent afterwards).
+- **Activity log:** shows the troop you are working in; the super admin also sees entries that belong to no troop (adding, renaming and deleting troops).
+- Files touched: `schema.sql`, `server.js`, `public/common.js`, `public/leader.html`, `public/style.css`, `public/i18n/en.json`, `public/i18n/ar.json`, `README.md`.
