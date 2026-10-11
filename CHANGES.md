@@ -192,3 +192,23 @@ The English labels were left as they were (for example "Dashboard" and "Leader a
 - **Site name:** Arabic is now كشاف الفوج الثاني (header text on the main site, dashboard and login page titles); English stays Scout Troop 2.
 - **Troop name as tab title:** inside the leader area the browser tab shows the name of the troop you are working in (in the chosen language), following the troop switcher for the super admin. On the public dashboard and the login screen it shows the site name.
 
+## Patrols
+- **Each troop can split its scouts into patrols.** New `patrols` table (per troop, English and Arabic name) and `scouts.patrol_id`. Deleting a patrol keeps its scouts, they just end up without one; deleting a troop deletes its patrols. Nothing changes until a troop creates its first patrol: until then its list stays one group.
+- **Wording:** *Patrol / Patrols* in English for every troop. Arabic says **طليعة / الطلائع**, except the Rovers troop (theme *Rovers*), which says **رهط / الرهوط**. All texts use `{unit}` / `{units}` placeholders resolved by `tu()` in `common.js`, so the word follows the troop being looked at (the dashboard's troop picker, or the troop the leader/super admin is working in).
+- **Who can do what:** admins and the super admin create, rename and delete a troop's patrols in the new **Patrols** tab; any leader of the troop puts a scout in a patrol from the scout's page (a "Patrol" picker above roles and tags, only shown once the troop has patrols). The super admin works in whichever troop is selected in the switcher. A scout can only be put in a patrol of their own troop (checked on the server).
+- **Lists:** both the public dashboard and the leader's scout list now show a heading per patrol (with the number of scouts) and the scouts in none at the end under "No patrol". Order inside a group is unchanged (role priority, then XP). Search also matches patrol names.
+- Patrol names are public (like troop names); changes are written to the leader activity log.
+- Files touched: `schema.sql`, `server.js`, `public/common.js`, `public/leader.html`, `public/index.html`, `public/style.css`, `public/i18n/en.json`, `public/i18n/ar.json`.
+
+## Theme changes (round 2)
+- **Aqua** is now *أكوا (دليلات)* in Arabic (English stays *Aqua (guides)*; key still `ocean`).
+- **White** is now *أبيض (قيادي)* / *White (leaders)* (key still `white`).
+- **Pink** is removed. A troop that still used it is switched to the main purple theme on the next startup.
+- **Red** is split into *أحمر (مرشدات)* / *Red (guides)* (the existing theme, key `red`, so troops already using it are unchanged) and *أحمر (متقدم)* / *Red (advanced)* (new, key `red_advanced`). They look identical for now; the advanced one has its own key so its colors and logo can be changed later.
+
+## Leaders' patrol (قيادة الفرقة)
+- **Every troop has one pre-made patrol for its leaders, named قيادة الفرقة / Troop leadership.** It is always listed before every other patrol (in the Patrols tab, both scout lists and the scout's patrol picker), and it can't be renamed or deleted (new column `patrols.is_leadership`, one per troop). It has this name in every troop, Rovers included.
+- **Leader accounts are in it automatically:** when an admin creates a leader account, and for all existing leaders on the next startup (this includes the super admin's own scout profile, which sits in the troop it was in). A leader account's scout profile can't be moved to another patrol (the picker shows a note instead; the server refuses it too).
+- **Other scouts can still be put in it by hand** (for example a leader who has no account) from the scout's patrol picker.
+- New troops get it when they are created, existing troops on the next startup. Because every troop now has this patrol, the scout lists are grouped from the start: the leaders under قيادة الفرقة and the other scouts under "No patrol" until you create patrols for them.
+

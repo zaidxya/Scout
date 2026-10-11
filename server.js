@@ -53,7 +53,7 @@ const date = (v) => {
 };
 
 // ---- troop themes: the visual identity a troop's leaders see after signing in (the main site stays purple) ----
-const THEME_KEYS = ['default', 'rovers', 'forest', 'forest_girls', 'ocean', 'yellow', 'yellow_hannabies', 'red', 'pink', 'white'];
+const THEME_KEYS = ['default', 'rovers', 'forest', 'forest_girls', 'ocean', 'yellow', 'yellow_hannabies', 'red', 'red_advanced', 'white'];
 // what a troop's leaders see after signing in: the theme plus the optional text next to the logo
 const troopLook = async (troopId) => {
   const r = (await pool.query('SELECT theme, brand_en, brand_ar FROM troops WHERE id = $1', [troopId])).rows[0] || {};
@@ -188,6 +188,7 @@ app.post('/api/troops', requireLeader, requireSuper, wrap(async (req, res) => {
       await c.query('INSERT INTO activities (name_en, name_ar, xp, troop_id) SELECT name_en, name_ar, xp, $1 FROM activities WHERE troop_id = $2 ORDER BY id', [rows[0].id, copyFrom]);
       await c.query('INSERT INTO labels (kind, name_en, name_ar, color, priority, troop_id) SELECT kind, name_en, name_ar, color, priority, $1 FROM labels WHERE troop_id = $2 ORDER BY id', [rows[0].id, copyFrom]);
     }
+    await c.query('INSERT INTO patrols (troop_id, name_en, name_ar, is_leadership) VALUES ($1,$2,$3,true)', [rows[0].id, ...LEADERSHIP]); // every troop starts with its leaders' patrol
     return rows[0];
   });
   audit(req.leader, 'troop_add', { name: en }, row.id);
@@ -216,7 +217,7 @@ app.get('/api/scouts', wrap(async (req, res) => {
   let troop = parseInt(req.query.troop, 10);
   if (!Number.isInteger(troop)) troop = (await pool.query('SELECT MIN(id) AS id FROM troops')).rows[0].id; // no troop given: the first one
   const { rows } = await pool.query(
-    `SELECT s.id, s.name, s.photo_v, (s.photo IS NOT NULL) AS has_photo, COALESCE(x.total, 0)::int AS total_xp, ${ROLES_JSON}
+    `SELECT s.id, s.name, s.patrol_id, s.photo_v, (s.photo IS NOT NULL) AS has_photo, COALESCE(x.total, 0)::int AS total_xp, ${ROLES_JSON}
      FROM scouts s LEFT JOIN (SELECT scout_id, SUM(xp) AS total FROM xp_log GROUP BY scout_id) x ON x.scout_id = s.id
      WHERE s.troop_id = $1
      ORDER BY (SELECT COALESCE(MAX(l.priority), 0) FROM scout_labels sl JOIN labels l ON l.id = sl.label_id AND l.kind = 'role' WHERE sl.scout_id = s.id) DESC, total_xp DESC, s.name`,
@@ -244,7 +245,7 @@ app.get('/api/scouts/:id/photo', wrap(async (req, res) => {
 // searchable list for leaders: includes private search fields, leader flag and role/tag ids
 app.get('/api/leader/scouts', requireLeader, wrap(async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT s.id, s.name, s.troop_id, s.photo_v, (s.photo IS NOT NULL) AS has_photo, s.full_name, s.phone,
+    `SELECT s.id, s.name, s.troop_id, s.patrol_id, s.photo_v, (s.photo IS NOT NULL) AS has_photo, s.full_name, s.phone,
        COALESCE(x.total, 0)::int AS total_xp,
        EXISTS (SELECT 1 FROM leaders l WHERE l.scout_id = s.id) AS is_leader,
        COALESCE((SELECT json_agg(sl.label_id) FROM scout_labels sl WHERE sl.scout_id = s.id), '[]'::json) AS label_ids
@@ -253,6 +254,63 @@ app.get('/api/leader/scouts', requireLeader, wrap(async (req, res) => {
      ORDER BY (SELECT COALESCE(MAX(l.priority), 0) FROM scout_labels sl JOIN labels l ON l.id = sl.label_id AND l.kind = 'role' WHERE sl.scout_id = s.id) DESC, total_xp DESC, s.name`,
     [req.troop]);
   res.json(rows);
+}));
+
+// ---- patrols: each troop splits its scouts into its own patrols. The names are public (the dashboard groups scouts by them);
+// admins manage them, any leader of the troop puts a scout in one ----
+const LEADERSHIP = ['Troop leadership', 'قيادة الفرقة']; // name of every troop's pre-made leaders' patrol
+app.get('/api/patrols', wrap(async (req, res) => {
+  let troop = parseInt(req.query.troop, 10);
+  if (!Number.isInteger(troop)) troop = (await pool.query('SELECT MIN(id) AS id FROM troops')).rows[0].id; // no troop given: the first one
+  res.json((await pool.query('SELECT id, name_en, name_ar, is_leadership FROM patrols WHERE troop_id = $1 ORDER BY is_leadership DESC, id', [troop])).rows); // the leaders' patrol always comes first
+}));
+
+const patrolNames = (b) => {
+  const en = text(b?.name_en, 40), ar = text(b?.name_ar, 40);
+  if (!en && !ar) throw invalid();
+  return [en || ar, ar || en];
+};
+
+app.post('/api/patrols', requireLeader, requireAdmin, wrap(async (req, res) => {
+  const [en, ar] = patrolNames(req.body);
+  const { rows } = await pool.query('INSERT INTO patrols (troop_id, name_en, name_ar) VALUES ($1,$2,$3) RETURNING id, name_en, name_ar', [req.troop, en, ar]);
+  audit(req.leader, 'patrol_add', { name: en }, req.troop);
+  res.status(201).json(rows[0]);
+}));
+
+app.put('/api/patrols/:id', requireLeader, requireAdmin, wrap(async (req, res) => {
+  const [en, ar] = patrolNames(req.body);
+  const cur = (await pool.query('SELECT is_leadership FROM patrols WHERE id = $1 AND troop_id = $2', [intId(req.params.id), req.troop])).rows[0];
+  if (!cur) return bad(res, 'not_found', 404);
+  if (cur.is_leadership) return bad(res, 'forbidden', 403); // the leaders' patrol is pre-made and fixed
+  await pool.query('UPDATE patrols SET name_en = $1, name_ar = $2 WHERE id = $3', [en, ar, intId(req.params.id)]);
+  audit(req.leader, 'patrol_update', { name: en }, req.troop);
+  res.json({ ok: true });
+}));
+
+app.delete('/api/patrols/:id', requireLeader, requireAdmin, wrap(async (req, res) => {
+  // its scouts stay in the troop and simply end up without a patrol
+  const { rows } = await pool.query('DELETE FROM patrols WHERE id = $1 AND troop_id = $2 AND NOT is_leadership RETURNING name_en', [intId(req.params.id), req.troop]); // the leaders' patrol can't be deleted
+  if (rows[0]) audit(req.leader, 'patrol_delete', { name: rows[0].name_en }, req.troop);
+  res.json({ ok: true });
+}));
+
+app.put('/api/scouts/:id/patrol', requireLeader, wrap(async (req, res) => {
+  const id = intId(req.params.id);
+  const sc = await scoutFor(req, id);
+  if (!sc) return bad(res, 'not_found', 404);
+  // leader accounts always stay in the leaders' patrol
+  if ((await pool.query('SELECT 1 FROM leaders WHERE scout_id = $1', [id])).rowCount) return bad(res, 'forbidden', 403);
+  const pid = req.body?.patrol_id == null || req.body.patrol_id === '' ? null : intId(req.body.patrol_id);
+  let name = null;
+  if (pid !== null) {
+    const p = await pool.query('SELECT name_en FROM patrols WHERE id = $1 AND troop_id = $2', [pid, sc.troop_id]); // only a patrol of the scout's own troop
+    if (!p.rows[0]) return bad(res, 'not_found', 404);
+    name = p.rows[0].name_en;
+  }
+  await pool.query('UPDATE scouts SET patrol_id = $1 WHERE id = $2', [pid, id]);
+  audit(req.leader, 'scout_patrol', { name: sc.name, patrol: name }, sc.troop_id);
+  res.json({ ok: true });
 }));
 
 // ---- leader: roles and tags (each troop has its own set; everyone reads their troop's, only list editors change them) ----
@@ -461,7 +519,7 @@ app.post('/api/leaders', requireLeader, requireAdmin, wrap(async (req, res) => {
   try {
     // one statement: creates the leader's scout profile and the leader together (or neither)
     const { rows } = await pool.query(
-      `WITH s AS (INSERT INTO scouts (name, troop_id) VALUES ($3, $5) RETURNING id)
+      `WITH s AS (INSERT INTO scouts (name, troop_id, patrol_id) VALUES ($3, $5, (SELECT id FROM patrols WHERE troop_id = $5 AND is_leadership)) RETURNING id)
        INSERT INTO leaders (username, password_hash, scout_id, role, troop_id) SELECT $1::text, $2::text, id, $4::text, $5::int FROM s RETURNING id, username, role`,
       [username, await bcrypt.hash(password, 12), display, role, troop]);
     audit(req.leader, 'leader_add', { name: rows[0].username }, troop);
@@ -515,6 +573,7 @@ app.use((err, req, res, next) => {
 (async () => {
   await pool.query(fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8'));
   // troops: make sure one exists and that everything created before troops existed belongs to it
+  await pool.query("UPDATE troops SET theme = 'default' WHERE theme = 'pink'"); // the pink theme was removed: troops that used it fall back to the main purple
   let firstTroop = (await pool.query('SELECT MIN(id) AS id FROM troops')).rows[0].id;
   if (!firstTroop) {
     firstTroop = (await pool.query("INSERT INTO troops (name_en, name_ar) VALUES ('Rovers', 'الجوالة') RETURNING id")).rows[0].id;
@@ -585,6 +644,9 @@ app.use((err, req, res, next) => {
       [l.id, l.username, l.troop_id ?? firstTroop]);
     console.log(`Created scout profile for leader "${l.username}"`);
   }
+  // every troop has its pre-made leaders' patrol, and every leader account's scout profile is in it
+  await pool.query('INSERT INTO patrols (troop_id, name_en, name_ar, is_leadership) SELECT t.id, $1, $2, true FROM troops t WHERE NOT EXISTS (SELECT 1 FROM patrols p WHERE p.troop_id = t.id AND p.is_leadership)', LEADERSHIP);
+  await pool.query('UPDATE scouts s SET patrol_id = p.id FROM leaders l, patrols p WHERE l.scout_id = s.id AND p.troop_id = s.troop_id AND p.is_leadership AND s.patrol_id IS DISTINCT FROM p.id');
   const port = process.env.PORT || 3000;
   app.listen(port, () => console.log(`Listening on ${port}`));
 })().catch((e) => { console.error('Startup failed:', e.message); process.exit(1); });

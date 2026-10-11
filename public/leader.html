@@ -36,6 +36,7 @@
       <div class="tabs" role="tablist">
         <button id="btn-scouts" type="button" role="tab" data-i18n="tab_scouts"></button>
         <button id="btn-activities" type="button" role="tab" data-i18n="tab_activities"></button>
+        <button id="btn-patrols" type="button" role="tab" data-unit="tab_patrols"></button>
         <button id="btn-labels" type="button" role="tab" data-i18n="tab_labels"></button>
         <button id="btn-troops" type="button" role="tab" data-i18n="tab_troops"></button>
         <button id="btn-leaders" type="button" role="tab" data-i18n="tab_leaders"></button>
@@ -71,6 +72,22 @@
               <label><span data-i18n="name_ar"></span><input name="name_ar" type="text" maxlength="60" dir="rtl"></label>
             </div>
             <label><span data-i18n="xp_value"></span><input name="xp" type="number" min="-10000" max="10000" step="1" required style="max-width:10rem"></label>
+            <button class="btn" type="submit" data-i18n="add"></button>
+          </form>
+        </div>
+      </div>
+
+      <div id="tab-patrols" class="hidden">
+        <div class="panel">
+          <h2 data-unit="patrols_title"></h2>
+          <p class="hint" data-unit="patrols_hint"></p>
+          <ul id="patrolList" class="simple-list"></ul>
+          <form id="patrolForm">
+            <h3 data-unit="add_patrol"></h3>
+            <div class="grid2">
+              <label><span data-i18n="name_en"></span><input name="name_en" type="text" maxlength="40"></label>
+              <label><span data-i18n="name_ar"></span><input name="name_ar" type="text" maxlength="40" dir="rtl"></label>
+            </div>
             <button class="btn" type="submit" data-i18n="add"></button>
           </form>
         </div>
@@ -162,12 +179,12 @@
   <script src="/common.js"></script>
   <script>
     const $ = (id) => document.getElementById(id);
-    let scouts = [], current = null, data = null, det = null, acts = [], labels = [], leaders = [], troops = [], me = '', myRole = 'leader', myTroop = null; // myTroop: the leader's own troop (null for the super admin, who is not bound to one)
+    let scouts = [], current = null, data = null, det = null, acts = [], labels = [], patrols = [], leaders = [], troops = [], me = '', myRole = 'leader', myTroop = null; // myTroop: the leader's own troop (null for the super admin, who is not bound to one)
     const activeTroop = () => state.troop; // the troop being worked on: myTroop, or whichever one the super admin switched to
     const isAdmin = () => myRole === 'admin' || myRole === 'super_admin';
     const isSuper = () => myRole === 'super_admin';
-    const TABS = ['scouts', 'activities', 'labels', 'troops', 'leaders', 'log', 'password'];
-    const ADMIN_TABS = ['leaders', 'log']; // admins and the super admin
+    const TABS = ['scouts', 'activities', 'patrols', 'labels', 'troops', 'leaders', 'log', 'password'];
+    const ADMIN_TABS = ['patrols', 'leaders', 'log']; // admins and the super admin
     const SUPER_TABS = ['labels', 'troops']; // the super admin only: each troop's roles/tags (in the troop being worked on) and the troops themselves
 
     const msg = (text, ok) => { $('toast').textContent = text || ''; $('toast').className = 'error' + (ok ? ' ok' : ''); };
@@ -197,6 +214,7 @@
         if (x === n) $('btn-' + x).scrollIntoView({ block: 'nearest', inline: 'nearest' });
       });
       if (n === 'activities') loadActs();
+      if (n === 'patrols') loadPatrols();
       if (n === 'labels') loadLabels();
       if (n === 'troops') loadTroops();
       if (n === 'leaders' && isAdmin()) loadLeaders();
@@ -213,7 +231,8 @@
     function matches(s, q) {
       if (!q) return true;
       const names = s.label_ids.map(labelById).filter(Boolean).flatMap((l) => [l.name_en, l.name_ar]);
-      return [s.name, s.full_name, s.phone, ...names].some((v) => norm(v).includes(q));
+      const p = patrols.find((x) => x.id === s.patrol_id);
+      return [s.name, s.full_name, s.phone, ...names, p?.name_en, p?.name_ar].some((v) => norm(v).includes(q));
     }
     function chips(ids) {
       return el('span', { class: 'chips' }, ids.map(labelById).filter(Boolean)
@@ -237,13 +256,14 @@
       state.troop = ok ? id : troops[0]?.id ?? null;
       if (isSuper()) { try { localStorage.setItem('leaderTroop', String(state.troop)); } catch { /* ignore */ } }
       const tr = troopById(state.troop);
+      setUnitTheme(tr?.theme); paintUnits(); // Rovers call their patrols رهط
       applyTheme(tr?.theme, { en: tr?.brand_en, ar: tr?.brand_ar }, tr && { en: tr.name_en, ar: tr.name_ar }); // the leader area wears the identity (and tab title) of the troop being worked on
     }
     // everything below the switcher belongs to one troop, so switching reloads it all
     async function loadTroopData() {
-      current = null; data = det = null; acts = []; labels = []; scouts = [];
-      [acts, labels, scouts] = await Promise.all([api('/api/activities'), api('/api/labels'), api('/api/leader/scouts')]);
-      drawList(); drawDetail(); drawActs(); drawLabels();
+      current = null; data = det = null; acts = []; labels = []; patrols = []; scouts = [];
+      [acts, labels, patrols, scouts] = await Promise.all([api('/api/activities'), api('/api/labels'), api('/api/patrols?troop=' + activeTroop()), api('/api/leader/scouts')]);
+      drawList(); drawDetail(); drawActs(); drawLabels(); drawPatrols();
       if (!$('tab-leaders').classList.contains('hidden')) loadLeaders();
       if (!$('tab-log').classList.contains('hidden')) loadLog();
     }
@@ -257,7 +277,7 @@
       const shown = scouts.filter((s) => matches(s, q));
       renderScoutList($('list'), shown, current, (id) => openScout(id),
         (s) => el('span', { class: 'sub' }, chips(s.label_ids)),
-        scouts.length ? 'no_results' : 'no_scouts');
+        scouts.length ? 'no_results' : 'no_scouts', patrols);
     }
     $('q').addEventListener('input', frame(drawList));
 
@@ -340,7 +360,18 @@
             : el('p', { class: 'empty', style: 'margin:.2rem 0' }, t('no_labels')),
           free.length ? pick : '');
       };
-      const labelsPanel = el('div', { class: 'panel' }, labelBlock('role', 'roles'), labelBlock('tag', 'tags'));
+      // patrol (only when the troop has any)
+      const myPatrol = (scouts.find((s) => s.id === data.id) || {}).patrol_id ?? null;
+      const patrolPick = el('select', { 'aria-label': tu('patrol_select') }, el('option', { value: '' }, tu('no_patrol')),
+        patrols.map((p) => el('option', { value: p.id, ...(p.id === myPatrol ? { selected: '' } : {}) }, patrolName(p))));
+      patrolPick.addEventListener('change', async () => {
+        try { await api(`/api/scouts/${data.id}/patrol`, 'PUT', { patrol_id: patrolPick.value ? Number(patrolPick.value) : null }); msg(''); await refresh(); } catch (e) { fail(e); }
+      });
+      const isLeaderScout = !!(scouts.find((s) => s.id === data.id) || {}).is_leader; // leader accounts always stay in the leaders' patrol
+      const lead = patrols.find((p) => p.is_leadership);
+      const patrolBlock = patrols.length ? el('div', { style: 'margin-bottom:.9rem' }, el('h3', {}, tu('patrol_select')),
+        isLeaderScout && lead ? el('p', { style: 'margin:.2rem 0' }, el('span', { class: 'chip role' }, patrolName(lead)), ' ', el('small', { class: 'hint' }, t('patrol_leaders_note'))) : patrolPick) : '';
+      const labelsPanel = el('div', { class: 'panel' }, patrolBlock, labelBlock('role', 'roles'), labelBlock('tag', 'tags'));
 
       // photo
       const file = el('input', { type: 'file', accept: 'image/*', class: 'hidden' });
@@ -401,6 +432,34 @@
       } catch (e) { fail(e); }
     });
 
+    // ---------- patrols (admins and the super admin manage them) ----------
+    async function loadPatrols() { try { patrols = await api('/api/patrols?troop=' + activeTroop()); drawPatrols(); drawList(); } catch (e) { fail(e); } }
+    function drawPatrols() {
+      const box = $('patrolList');
+      if (!patrols.length) return box.replaceChildren(el('li', { class: 'empty' }, tu('patrol_none_yet')));
+      box.replaceChildren(...patrols.map((p) => {
+        const en = el('input', { type: 'text', maxlength: '40', value: p.name_en, 'aria-label': t('name_en') });
+        const ar = el('input', { type: 'text', maxlength: '40', value: p.name_ar, dir: 'rtl', 'aria-label': t('name_ar') });
+        const count = scouts.filter((s) => s.patrol_id === p.id).length;
+        if (p.is_leadership) return el('li', {}, el('div', { class: 'patrol-row grow' }, // pre-made: fixed name, can't be deleted
+          el('b', { class: 'grow' }, patrolName(p)), el('small', {}, `${fmt(count)} · ${t('patrol_fixed')}`)));
+        return el('li', {}, el('div', { class: 'patrol-row grow' }, en, ar, el('small', {}, fmt(count)),
+          el('button', { class: 'btn small', type: 'button', onclick: async () => {
+            try { await api('/api/patrols/' + p.id, 'PUT', { name_en: en.value, name_ar: ar.value }); msg(t('saved'), true); await loadPatrols(); } catch (e) { fail(e); }
+          } }, t('save')),
+          el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
+            if (!(await confirmBox(tu('confirm_delete_patrol')))) return;
+            try { await api('/api/patrols/' + p.id, 'DELETE'); msg(''); await Promise.all([loadPatrols(), loadScouts()]); } catch (e) { fail(e); }
+          } }, t('delete'))));
+      }));
+    }
+    $('patrolForm').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const f = new FormData(ev.target);
+      try { await api('/api/patrols', 'POST', { name_en: f.get('name_en'), name_ar: f.get('name_ar') }); ev.target.reset(); msg(''); await loadPatrols(); }
+      catch (e) { fail(e); }
+    });
+
     // ---------- activities ----------
     async function loadActs() { try { acts = await api('/api/activities'); drawActs(); } catch (e) { fail(e); } }
     function drawActs() {
@@ -425,12 +484,13 @@
     function describe(r) {
       const m = r.meta || {}, ar = state.lang === 'ar';
       const act = ar ? m.activity_ar : m.activity_en;
-      const verb = t('audit_' + r.action);
+      const verb = tu('audit_' + r.action);
       switch (r.action) {
         case 'xp_award': return `${verb} ${signed(m.xp)} ${t('xp')} (${act}) ${t('audit_to')} ${m.name}`;
         case 'xp_undo': return `${verb} ${signed(m.xp)} ${t('xp')} (${act}) ${t('audit_from')} ${m.name}`;
         case 'activity_add': return `${verb} ${ar ? m.name_ar : m.name_en} (${signed(m.xp)} ${t('xp')})`;
         case 'activity_delete': return `${verb} ${ar ? m.name_ar : m.name_en}`;
+        case 'scout_patrol': return `${verb} ${m.name}${m.patrol ? ` (${m.patrol})` : ''}`;
         case 'login': case 'logout': case 'password_change': return verb;
         default: return `${verb} ${m.name || ''}`;
       }
@@ -558,8 +618,8 @@
         troops = await api('/api/troops');
         chooseTroop(isSuper() ? saved : myTroop); // the super admin starts in the troop they used last; everyone else in their own
         fillTroopSelects();
-        [acts, labels, scouts] = await Promise.all([api('/api/activities'), api('/api/labels'), api('/api/leader/scouts')]);
-        drawList();
+        [acts, labels, patrols, scouts] = await Promise.all([api('/api/activities'), api('/api/labels'), api('/api/patrols?troop=' + activeTroop()), api('/api/leader/scouts')]);
+        drawList(); drawPatrols();
       } catch (e) { fail(e); }
       drawDetail();
     }
@@ -571,11 +631,11 @@
         $('loginErr').textContent = ''; ev.target.reset(); await enter(r.username, r.role, r.troop_id, r);
       } catch (e) { $('loginErr').textContent = errText(e); }
     });
-    $('logoutBtn').addEventListener('click', async () => { await api('/api/logout', 'POST'); state.troop = null; applyTheme('default'); data = det = null; current = null; show(false); });
+    $('logoutBtn').addEventListener('click', async () => { await api('/api/logout', 'POST'); state.troop = null; setUnitTheme('default'); applyTheme('default'); data = det = null; current = null; show(false); });
 
     document.addEventListener('langchange', () => {
       if ($('app').classList.contains('hidden')) return;
-      fillTroopSelects(); drawList(); drawDetail(); drawActs(); drawLabels(); drawTroops(); drawLeaders(); drawLog();
+      paintUnits(); fillTroopSelects(); drawList(); drawDetail(); drawActs(); drawPatrols(); drawLabels(); drawTroops(); drawLeaders(); drawLog();
     });
 
     (async () => {

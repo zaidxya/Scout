@@ -48,23 +48,14 @@
   --ink: #2b2100; --ink-rgb: 43,33,0; --muted: #7a6a3a; --line: #efe2b4;
 }
 :root[data-theme=yellow] header, :root[data-theme=yellow_hannabies] header { --primary: #f6c21c; --on-primary: #2b1f00; --on-primary-rgb: 43,31,0; }
-/* troop theme: Red */
-:root[data-theme=red] {
+/* troop themes: Red (guides, key: red) and Red (advanced, key: red_advanced; same colors for now, own key so it can be customised) */
+:root[data-theme=red], :root[data-theme=red_advanced] {
   --ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23c62828' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z'/%3E%3C/svg%3E");
   --primary: #c62828; --primary-hover: #dd4444; --primary-rgb: 198,40,40;
   --on-primary: #fff3f0; --on-primary-rgb: 255,243,240;
   --accent: #f2b9b3; --accent-soft: #fdeceb;
   --bg: #fdf6f5; --paper: #fffefe;
   --ink: #2b0f0f; --ink-rgb: 43,15,15; --muted: #7a5c5c; --line: #f0d9d6;
-}
-/* troop theme: Pink */
-:root[data-theme=pink] {
-  --ico: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23c2386f' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z'/%3E%3C/svg%3E");
-  --primary: #c2386f; --primary-hover: #d6538a; --primary-rgb: 194,56,111;
-  --on-primary: #fff4f8; --on-primary-rgb: 255,244,248;
-  --accent: #f4bfd5; --accent-soft: #fdebf3;
-  --bg: #fdf6f9; --paper: #fffefe;
-  --ink: #2c1020; --ink-rgb: 44,16,32; --muted: #80606f; --line: #f2dbe5;
 }
 /* troop theme: White (white header, charcoal buttons) */
 :root[data-theme=white] {
@@ -362,6 +353,13 @@ button, a, select, input[type=checkbox] { touch-action: manipulation; -webkit-ta
 
 /* troops */
 #troopPick { margin-bottom: .6rem; }
+/* a patrol heading inside the scout list */
+.scout-list li.group-head { display: flex; align-items: baseline; justify-content: space-between; gap: .5rem; padding: .85rem .6rem .3rem; font-weight: 800; font-size: .9rem; color: var(--primary); border-bottom: 2px solid var(--accent); }
+.scout-list li.group-head small { color: var(--muted); font-weight: 700; }
+.scout-list li.group-head:first-child { padding-top: .4rem; }
+:root:not([data-theme]) .scout-list li.group-head + li { border-top: 0; }
+.patrol-row { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.patrol-row input { flex: 1 1 9rem; min-width: 0; }
 /* the super admin's troop switcher above the tabs */
 .troop-bar { display: flex; align-items: center; gap: .6rem; margin-bottom: .9rem; flex-wrap: wrap; }
 .troop-bar label { font-weight: 700; color: var(--muted); }

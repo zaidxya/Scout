@@ -11,8 +11,8 @@ const THEMES = {
   ocean: { logo: '/logo-guides.png', wordmark: false, color: '#14507a' },
   yellow: { logo: '/logo-cubs.png', onWhite: true, wordmark: false, color: '#f6c21c' }, // Yellow (cubs)
   yellow_hannabies: { logo: '/logo-hannabies.png', onWhite: true, wordmark: false, color: '#f6c21c' },
-  red: { logo: '/logo-mark.png', wordmark: false, color: '#c62828' },
-  pink: { logo: '/logo-mark.png', wordmark: false, color: '#c2386f' },
+  red: { logo: '/logo-mark.png', wordmark: false, color: '#c62828' }, // Red (guides)
+  red_advanced: { logo: '/logo-mark.png', wordmark: false, color: '#c62828' },
   white: { logo: '/logo-mark-dark.png', wordmark: false, color: '#ffffff' },
 };
 const look = { theme: 'default', brand: null, title: null }; // title = { en, ar }: the troop's name shown as the tab title in the leader area (null = the site name) // brand = { en, ar } custom text next to the logo (null = the site name)
@@ -24,6 +24,18 @@ function paintBrand() {
   brand.classList.toggle('notext', !custom && !!(THEMES[look.theme] || {}).wordmark); // a wordmark logo already says the name
 }
 // the browser tab title: the troop's name inside a troop's leader area, otherwise the page's own title
+// patrols are called "patrol" / طليعة, except in the Rovers troop where Arabic says رهط; the word depends on the theme of the troop being looked at.
+// Texts use {unit} / {units} (and {unit_l} / {units_l} in lowercase for English) and go through tu() instead of t().
+let unitTheme = 'default';
+const setUnitTheme = (key) => { unitTheme = key || 'default'; };
+function tu(key) {
+  const r = unitTheme === 'rovers' ? '_r' : '', one = t('unit' + r), many = t('units' + r);
+  return t(key).replaceAll('{unit_l}', one.toLowerCase()).replaceAll('{units_l}', many.toLowerCase()).replaceAll('{unit}', one).replaceAll('{units}', many);
+}
+// elements marked data-unit="key" are filled with the troop's own word (call again after a language or troop change)
+const paintUnits = () => document.querySelectorAll('[data-unit]').forEach((n) => { n.textContent = tu(n.dataset.unit); });
+const patrolName = (p) => (state.lang === 'ar' ? p.name_ar : p.name_en);
+
 function paintTitle() {
   const own = look.title && (state.lang === 'ar' ? look.title.ar || look.title.en : look.title.en || look.title.ar);
   document.title = own || t(document.documentElement.dataset.title || 'title');
@@ -136,19 +148,21 @@ function avatar(s, big) {
 const norm = (v) => String(v ?? '').toLowerCase().normalize('NFKD')
   .replace(/[\u064B-\u065F\u0670\u0640]/g, '').replace(/[أإآ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه');
 
-function renderScoutList(ul, scouts, selectedId, onSelect, extra, emptyKey = 'no_scouts') {
+// patrols (optional): the troop's patrols; when it has any, the list is split under a heading per patrol, with scouts in none last
+function renderScoutList(ul, scouts, selectedId, onSelect, extra, emptyKey = 'no_scouts', patrols = []) {
   ul.replaceChildren();
   if (!scouts.length) {
     ul.append(el('li', { class: 'empty', style: 'padding:.75rem .5rem' }, t(emptyKey)));
     return;
   }
-  scouts.forEach((s) =>
-    ul.append(
-      el('li', {},
-        el('button', { type: 'button', 'aria-current': String(s.id === selectedId), onclick: () => onSelect(s.id) },
-          avatar(s), el('span', { class: 'nm' }, s.name, extra ? extra(s) : ''), el('span', { class: 'xp' + (s.total_xp < 0 ? ' neg' : '') }, `${fmt(s.total_xp)} ${t('xp')}`)))
-    )
-  );
+  const row = (s) => el('li', {},
+    el('button', { type: 'button', 'aria-current': String(s.id === selectedId), onclick: () => onSelect(s.id) },
+      avatar(s), el('span', { class: 'nm' }, s.name, extra ? extra(s) : ''), el('span', { class: 'xp' + (s.total_xp < 0 ? ' neg' : '') }, `${fmt(s.total_xp)} ${t('xp')}`)));
+  if (!patrols.length) { scouts.forEach((s) => ul.append(row(s))); return; }
+  const group = (title, list) => { if (list.length) ul.append(el('li', { class: 'group-head' }, el('span', {}, title), el('small', {}, fmt(list.length))), ...list.map(row)); };
+  patrols.forEach((p) => group(patrolName(p), scouts.filter((s) => s.patrol_id === p.id)));
+  const ids = new Set(patrols.map((p) => p.id));
+  group(tu('no_patrol'), scouts.filter((s) => !ids.has(s.patrol_id)));
 }
 
 function renderDetailHead(scout, showRoles = true) {

@@ -113,5 +113,19 @@ END $$;
 -- activities and roles/tags are separate for each troop (older databases had one shared list; startup copies it per troop)
 ALTER TABLE activities ADD COLUMN IF NOT EXISTS troop_id INT REFERENCES troops(id) ON DELETE CASCADE;
 ALTER TABLE labels ADD COLUMN IF NOT EXISTS troop_id INT REFERENCES troops(id) ON DELETE CASCADE;
+-- patrols (called "رهط" in the Rovers troop in the interface): each troop splits its scouts into its own patrols
+CREATE TABLE IF NOT EXISTS patrols (
+  id SERIAL PRIMARY KEY,
+  troop_id INT NOT NULL REFERENCES troops(id) ON DELETE CASCADE,
+  name_en TEXT NOT NULL,
+  name_ar TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS patrols_troop_idx ON patrols(troop_id);
+-- every troop has one pre-made patrol for its leaders ("قيادة الفرقة"): listed first, can't be renamed or deleted
+ALTER TABLE patrols ADD COLUMN IF NOT EXISTS is_leadership BOOLEAN NOT NULL DEFAULT false;
+CREATE UNIQUE INDEX IF NOT EXISTS patrols_one_leadership ON patrols (troop_id) WHERE is_leadership;
+ALTER TABLE scouts ADD COLUMN IF NOT EXISTS patrol_id INT REFERENCES patrols(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS scouts_patrol_idx ON scouts(patrol_id);
 CREATE INDEX IF NOT EXISTS activities_troop_idx ON activities(troop_id);
 CREATE INDEX IF NOT EXISTS labels_troop_idx ON labels(troop_id);

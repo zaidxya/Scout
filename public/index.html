@@ -32,14 +32,14 @@
   <script src="/common.js"></script>
   <script>
     const listEl = document.getElementById('list'), detailEl = document.getElementById('detail'), search = document.getElementById('search');
-    let scouts = [], troops = [], troop = null, current = null, data = null;
+    let scouts = [], patrols = [], troops = [], troop = null, current = null, data = null;
     const picker = document.getElementById('troopPick');
     const detailCache = {}; // last seen detail per scout, shown instantly while the fresh copy loads
 
     function drawList() {
       const q = norm(search.value.trim());
-      const hit = (s) => [s.name, ...(s.roles || []).flatMap((r) => [r.name_en, r.name_ar])].some((v) => norm(v).includes(q));
-      renderScoutList(listEl, scouts.filter(hit), current, openScout, (s) => el('span', { class: 'sub' }, roleChips(s.roles)), scouts.length ? 'no_results' : 'no_scouts');
+      const hit = (s) => { const p = patrols.find((x) => x.id === s.patrol_id); return [s.name, p?.name_en, p?.name_ar, ...(s.roles || []).flatMap((r) => [r.name_en, r.name_ar])].some((v) => norm(v).includes(q)); };
+      renderScoutList(listEl, scouts.filter(hit), current, openScout, (s) => el('span', { class: 'sub' }, roleChips(s.roles)), scouts.length ? 'no_results' : 'no_scouts', patrols); // split under a heading per patrol when the troop has any
     }
     let loading = false;
     function drawDetail() {
@@ -80,14 +80,28 @@
       try { localStorage.setItem('scouts_cache_' + id, JSON.stringify(l)); } catch { /* storage full */ }
       return l;
     }
+    // patrols: the names are cached like the scout list; the patrol word (Rovers say رهط) follows the troop's theme, remembered for the first paint
+    const patrolCache = (id) => { try { return JSON.parse(localStorage.getItem('patrols_cache_' + id)) || []; } catch { return []; } };
+    async function loadPatrols(id) {
+      const p = await api('/api/patrols?troop=' + id);
+      try { localStorage.setItem('patrols_cache_' + id, JSON.stringify(p)); } catch { /* storage full */ }
+      return p;
+    }
+    function useTroopWord(id) {
+      const th = troops.find((x) => x.id === id)?.theme;
+      if (th) { try { localStorage.setItem('unit_theme_' + id, th); } catch { /* ignore */ } setUnitTheme(th); }
+      else { let c = null; try { c = localStorage.getItem('unit_theme_' + id); } catch { /* ignore */ } setUnitTheme(c); }
+    }
     async function switchTroop(id, keepScout) {
       troop = id; try { localStorage.setItem('troop', id); } catch { /* ignore */ }
+      useTroopWord(id); patrols = patrolCache(id);
       picker.value = String(id);
       if (!keepScout) { current = null; data = null; loading = false; history.replaceState(null, '', location.pathname); drawDetail(); }
       scouts = listCache(id);
       if (scouts.length) drawList(); else listEl.replaceChildren(el('li', { class: 'empty', style: 'padding:.75rem .5rem' }, t('loading')));
-      const fresh = await loadList(id).catch(() => null);
+      const [fresh, freshP] = await Promise.all([loadList(id).catch(() => null), loadPatrols(id).catch(() => null)]);
       if (troop !== id) return; // the visitor already picked another troop
+      if (freshP) patrols = freshP;
       if (fresh && JSON.stringify(fresh) !== JSON.stringify(scouts)) scouts = fresh;
       drawList();
     }
@@ -99,13 +113,16 @@
       const saved = parseInt(localStorage.getItem('troop'), 10) || null; // the troop this visitor looked at last time
       const troopsReq = api('/api/troops').catch(() => []);
       const freshReq = saved ? loadList(saved).catch(() => null) : null; // start loading it now, in parallel
+      const freshPReq = saved ? loadPatrols(saved).catch(() => null) : null;
       await initLang();
-      if (saved && listCache(saved).length) { troop = saved; scouts = listCache(saved); drawList(); }
+      if (saved && listCache(saved).length) { troop = saved; scouts = listCache(saved); patrols = patrolCache(saved); useTroopWord(saved); drawList(); }
       troops = await troopsReq;
       const want = troops.some((x) => x.id === saved) ? saved : troops[0]?.id;
-      if (want) { troop = want; drawPicker(); }
+      if (want) { troop = want; useTroopWord(want); drawPicker(); }
       const fresh = want === saved && freshReq ? await freshReq : want ? await loadList(want).catch(() => null) : [];
+      const freshP = want === saved && freshPReq ? await freshPReq : want ? await loadPatrols(want).catch(() => null) : [];
       scouts = fresh || (want === saved ? scouts : []);
+      patrols = freshP || (want === saved ? patrols : []);
       drawList();
       const id = parseInt(location.hash.slice(1), 10);
       if (id) openScout(id); else drawDetail();
