@@ -216,6 +216,13 @@ label input, label select, label textarea { margin-top: .2rem; }
 .simple-list li { display: flex; align-items: center; gap: .75rem; padding: .55rem 0; border-bottom: 1px solid var(--line); }
 .simple-list .grow { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .simple-list li.acct { flex-wrap: wrap; }
+.simple-list li.lbl { flex-wrap: wrap; }
+.simple-list li.lbl > .perms { flex: 1 1 100%; order: 3; display: flex; flex-wrap: wrap; gap: .3rem 1rem; font-size: .85rem; color: var(--muted); }
+.perm { display: inline-flex; align-items: center; gap: .35rem; cursor: pointer; font-weight: 400; }
+.perm input { width: auto; margin: 0; }
+.perm-box { border: 1px solid var(--line); border-radius: 10px; padding: .6rem .9rem; margin: .8rem 0; }
+.perm-box legend { font-weight: 700; padding: 0 .4rem; }
+.perm-box .perm { display: flex; margin: .25rem 0; font-size: .95rem; }
 .simple-list li.acct > .grow { flex: 1 1 10rem; }
 .simple-list li.acct > form { flex: 1 1 100%; margin: 0 0 .25rem; }
 .hidden { display: none !important; }
@@ -403,3 +410,11 @@ header .brand.notext span { display: none; }
 /* troop edit form: names, logo text, theme and save wrap onto tidy rows */
 .troop-edit > input { flex: 1 1 14rem; }
 .troop-edit > select { flex: 1 1 12rem; width: auto; min-width: 0; }
+
+/* Public dashboard: the troop's colour (set by setTroopTint) on patrol headings, XP chips, the selected row and initial avatars.
+   Without --troop* (main site, leader area, default-theme troops) every rule falls back to the main purple. */
+.scout-list li.group-head { color: var(--troop, var(--primary)); border-bottom-color: var(--troop-accent, var(--accent)); }
+:root:not([data-theme]) .scout-list .xp:not(.neg) { color: var(--troop, var(--primary)); background: var(--troop-soft, var(--accent-soft)); }
+:root:not([data-theme]) .scout-list button[aria-current=true] { background: var(--troop-soft, var(--accent-soft)); box-shadow: inset 4px 0 0 var(--troop, var(--primary)); }
+:root:not([data-theme])[dir=rtl] .scout-list button[aria-current=true] { box-shadow: inset -4px 0 0 var(--troop, var(--primary)); }
+:root .avatar.initial { background: var(--troop-accent, var(--accent)); color: var(--troop, var(--primary)); }

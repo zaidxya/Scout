@@ -116,6 +116,11 @@
             <label><span data-i18n="color"></span><input name="color" type="color" value="#d3ad80" class="swatch"></label>
             <label><span data-i18n="priority"></span><input name="priority" type="number" min="0" max="1000" step="1" value="0" style="max-width:8rem"></label>
             <p class="hint" data-i18n="priority_hint"></p>
+            <fieldset id="permBox" class="perm-box">
+              <legend data-i18n="role_perms"></legend>
+              <div id="permChecks"></div>
+              <p class="hint" data-i18n="role_perms_hint"></p>
+            </fieldset>
             <button class="btn" type="submit" data-i18n="add"></button>
           </form>
         </div>
@@ -166,8 +171,7 @@
               <label><span data-i18n="password"></span><input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
             </div>
             <p class="hint" data-i18n="pw_hint"></p>
-            <label id="roleField" class="hidden"><span data-i18n="account_type"></span>
-              <select name="role" style="max-width:12rem"><option value="leader" data-i18n="acct_leader"></option><option value="admin" data-i18n="acct_admin"></option></select></label>
+            <label><span data-i18n="account_type"></span><select name="role"><option value="admin" data-i18n="acct_admin"></option><option value="mod" data-i18n="acct_mod"></option></select></label>
             <label><span data-i18n="display_name"></span><input name="display_name" type="text" maxlength="60"></label>
             <p class="hint" data-i18n="display_name_hint"></p>
             <button class="btn" type="submit" data-i18n="add"></button>
@@ -179,13 +183,16 @@
   <script src="/common.js"></script>
   <script>
     const $ = (id) => document.getElementById(id);
-    let scouts = [], current = null, data = null, det = null, acts = [], labels = [], patrols = [], leaders = [], troops = [], me = '', myRole = 'leader', myTroop = null; // myTroop: the leader's own troop (null for the super admin, who is not bound to one)
+    let scouts = [], current = null, data = null, det = null, acts = [], labels = [], patrols = [], leaders = [], troops = [], me = '', myRole = 'admin', myPerms = [], myTroop = null; // myTroop: the leader's own troop (null for the super admin, who is not bound to one)
     const activeTroop = () => state.troop; // the troop being worked on: myTroop, or whichever one the super admin switched to
-    const isAdmin = () => myRole === 'admin' || myRole === 'super_admin';
     const isSuper = () => myRole === 'super_admin';
+    // permissions: the super admin has them all; everyone else gets them from the roles on their scout profile (the server sends the list)
+    const PERMS = ['view_log', 'manage_accounts'];
+    const can = (p) => isSuper() || myPerms.includes(p);
     const TABS = ['scouts', 'activities', 'patrols', 'labels', 'troops', 'leaders', 'log', 'password'];
-    const ADMIN_TABS = ['patrols', 'leaders', 'log']; // admins and the super admin
-    const SUPER_TABS = ['labels', 'troops']; // the super admin only: each troop's roles/tags (in the troop being worked on) and the troops themselves
+    // tabs that need more than the basics: the troops are for the super admin only, the other two need a permission (given through a role)
+    const isMod = () => myRole === 'mod'; // a mod (مسؤول) only has the members and their activity (and its own password)
+    const tabAllowed = (n) => isMod() ? (n === 'scouts' || n === 'password') : (n === 'troops' ? isSuper() : n === 'leaders' ? can('manage_accounts') : n === 'log' ? can('view_log') : true);
 
     const msg = (text, ok) => { $('toast').textContent = text || ''; $('toast').className = 'error' + (ok ? ' ok' : ''); };
     const fail = (e) => { if (e.status === 401 && e.code === 'unauthorized') show(false); msg(errText(e)); };
@@ -199,14 +206,11 @@
     }
     // hide the admin-only and super-admin-only pieces from everyone else
     function applyRole() {
-      ADMIN_TABS.forEach((x) => $('btn-' + x).classList.toggle('hidden', !isAdmin()));
-      SUPER_TABS.forEach((x) => $('btn-' + x).classList.toggle('hidden', !isSuper()));
-      $('actForm').classList.toggle('hidden', !isSuper()); // a troop's activity list is read-only for everyone but the super admin
-      $('actHint').dataset.i18n = isSuper() ? 'activity_hint' : 'activity_hint_readonly';
-      $('actHint').textContent = t($('actHint').dataset.i18n);
+      TABS.forEach((x) => $('btn-' + x).classList.toggle('hidden', !tabAllowed(x)));
+      fillPermChecks();
     }
     function showTab(n) {
-      if ((ADMIN_TABS.includes(n) && !isAdmin()) || (SUPER_TABS.includes(n) && !isSuper())) n = 'scouts';
+      if (!tabAllowed(n)) n = 'scouts';
       msg('');
       TABS.forEach((x) => {
         $('tab-' + x).classList.toggle('hidden', x !== n);
@@ -217,7 +221,7 @@
       if (n === 'patrols') loadPatrols();
       if (n === 'labels') loadLabels();
       if (n === 'troops') loadTroops();
-      if (n === 'leaders' && isAdmin()) loadLeaders();
+      if (n === 'leaders' && can('manage_accounts')) loadLeaders();
       if (n === 'log') loadLog();
     }
     TABS.forEach((x) => $('btn-' + x).addEventListener('click', () => showTab(x)));
@@ -349,14 +353,15 @@
         try { await api(`/api/scouts/${data.id}/labels`, 'PUT', { label_ids: ids }); msg(''); await refresh(); } catch (e) { fail(e); }
       };
       const labelBlock = (kind, titleKey) => {
+        const locked = (l) => (l.permissions || []).some((p) => !can(p)); // a role with permissions you lack can't be given or taken by you
         const own = labels.filter((l) => l.kind === kind && mine.includes(l.id));
-        const free = labels.filter((l) => l.kind === kind && !mine.includes(l.id));
+        const free = labels.filter((l) => l.kind === kind && !mine.includes(l.id) && !locked(l));
         const pick = el('select', { 'aria-label': t(titleKey) }, el('option', { value: '' }, t('add_to_scout')),
           free.map((l) => el('option', { value: l.id }, labelName(l))));
         pick.addEventListener('change', () => { if (pick.value) saveLabels([...mine, Number(pick.value)]); });
         return el('div', { style: 'margin-bottom:.9rem' }, el('h3', {}, t(titleKey)),
           own.length ? el('div', { class: 'chips big' }, own.map((l) => el('span', { class: 'chip ' + kind, style: chipStyle(l) },
-            labelName(l), el('button', { type: 'button', 'aria-label': t('remove'), onclick: () => saveLabels(mine.filter((i) => i !== l.id)) }, '×'))))
+            labelName(l), locked(l) ? '' : el('button', { type: 'button', 'aria-label': t('remove'), onclick: () => saveLabels(mine.filter((i) => i !== l.id)) }, '×'))))
             : el('p', { class: 'empty', style: 'margin:.2rem 0' }, t('no_labels')),
           free.length ? pick : '');
       };
@@ -371,7 +376,7 @@
       const lead = patrols.find((p) => p.is_leadership);
       const patrolBlock = patrols.length ? el('div', { style: 'margin-bottom:.9rem' }, el('h3', {}, tu('patrol_select')),
         isLeaderScout && lead ? el('p', { style: 'margin:.2rem 0' }, el('span', { class: 'chip role' }, patrolName(lead)), ' ', el('small', { class: 'hint' }, t('patrol_leaders_note'))) : patrolPick) : '';
-      const labelsPanel = el('div', { class: 'panel' }, patrolBlock, labelBlock('role', 'roles'), labelBlock('tag', 'tags'));
+      const labelsPanel = isMod() ? '' : el('div', { class: 'panel' }, patrolBlock, labelBlock('role', 'roles'), labelBlock('tag', 'tags'));
 
       // photo
       const file = el('input', { type: 'file', accept: 'image/*', class: 'hidden' });
@@ -466,10 +471,10 @@
       $('actList').replaceChildren(...acts.map((a) => el('li', {},
         el('span', { class: 'grow' }, state.lang === 'ar' ? a.name_ar : a.name_en),
         el('b', { style: a.xp < 0 ? 'color:var(--danger)' : '' }, `${signed(a.xp)} ${t('xp')}`),
-        isSuper() ? el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
+        el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
           if (!(await confirmBox(t('confirm_delete_activity')))) return;
           try { await api('/api/activities/' + a.id, 'DELETE'); await loadActs(); } catch (e) { fail(e); }
-        } }, t('delete')) : '')));
+        } }, t('delete')))));
     }
     $('actForm').addEventListener('submit', async (ev) => {
       ev.preventDefault();
@@ -515,6 +520,7 @@
             l.color ? el('button', { class: 'btn ghost small', type: 'button', onclick: () => updateLabel(l, { color: '' }) }, t('default_color')) : '',
             kind === 'role' ? el('input', { type: 'number', min: '0', max: '1000', step: '1', value: String(l.priority || 0), class: 'prio', 'aria-label': t('priority'), title: t('priority'),
               onchange: (ev) => updateLabel(l, { priority: ev.target.value }) }) : '',
+            kind === 'role' ? permChecks(l.permissions || [], (next) => updateLabel(l, { permissions: next })) : '',
             el('span', { class: 'grow' }, l.name_en !== l.name_ar ? el('small', { style: 'opacity:.6' }, state.lang === 'ar' ? l.name_en : l.name_ar) : ''),
             el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
               if (!(await confirmBox(t('confirm_delete_label')))) return;
@@ -522,13 +528,27 @@
             } }, t('delete')))) : el('li', { class: 'empty' }, t('no_labels'))));
       }));
     }
+    // a row of permission checkboxes; ones you don't hold yourself are shown but can't be changed (the server refuses it too)
+    function permChecks(current, onChange) {
+      const wrap = el('span', { class: 'perms' });
+      const boxes = PERMS.map((p) => {
+        const box = el('input', { type: 'checkbox', value: p, ...(current.includes(p) ? { checked: '' } : {}), ...(can(p) ? {} : { disabled: '' }) });
+        wrap.append(el('label', { class: 'perm' }, box, ' ', t('perm_' + p)));
+        return box;
+      });
+      if (onChange) boxes.forEach((b) => b.addEventListener('change', () => onChange(boxes.filter((x) => x.checked).map((x) => x.value))));
+      return wrap;
+    }
+    function fillPermChecks() { $('permChecks').replaceChildren(permChecks([])); }
     async function updateLabel(l, patch) {
       try { await api('/api/labels/' + l.id, 'PUT', patch); await loadLabels(); await loadScouts(); msg(t('saved'), true); } catch (e) { fail(e); }
     }
+    $('labelForm').elements.kind.addEventListener('change', (ev) => $('permBox').classList.toggle('hidden', ev.target.value !== 'role'));
     $('labelForm').addEventListener('submit', async (ev) => {
       ev.preventDefault();
       const f = new FormData(ev.target);
-      try { await api('/api/labels', 'POST', { kind: f.get('kind'), name_en: f.get('name_en'), name_ar: f.get('name_ar'), color: f.get('color'), priority: f.get('priority') }); ev.target.reset(); msg(t('saved'), true); await loadLabels(); }
+      try { await api('/api/labels', 'POST', { kind: f.get('kind'), name_en: f.get('name_en'), name_ar: f.get('name_ar'), color: f.get('color'), priority: f.get('priority'),
+          permissions: f.get('kind') === 'role' ? [...document.querySelectorAll('#permChecks input:checked')].map((x) => x.value) : [] }); ev.target.reset(); fillPermChecks(); msg(t('saved'), true); await loadLabels(); }
       catch (e) { fail(e); }
     });
 
@@ -571,7 +591,6 @@
     async function loadLeaders() { try { leaders = await api('/api/leaders'); drawLeaders(); } catch (e) { fail(e); } }
     const acctName = (r) => t('acct_' + r);
     function drawLeaders() {
-      $('roleField').classList.toggle('hidden', myRole !== 'super_admin'); // only the super admin can create admins
       $('leaderList').replaceChildren(...leaders.map((l) => {
         const pwRow = el('form', { class: 'row troop-edit hidden' },
           el('input', { type: 'password', name: 'password', minlength: '8', required: '', autocomplete: 'new-password', placeholder: t('reset_pw_for'), 'aria-label': t('reset_pw_for') }),
@@ -583,7 +602,7 @@
         });
         return el('li', { class: 'acct' },
           el('span', { class: 'grow' }, l.username, l.username === me ? ` ${t('you')}` : '', ' ',
-            el('span', { class: 'chip' + (l.role === 'leader' ? '' : ' leader') }, acctName(l.role)),
+            el('span', { class: 'chip leader' }, acctName(l.role)),
             l.role === 'super_admin' ? el('small', { style: 'display:block;opacity:.7' }, t('all_troops_acct')) : '',
             l.scout_name && l.scout_name !== l.username ? el('small', { style: 'display:block;opacity:.7' }, `${t('scout_profile')} ${l.scout_name}`) : ''),
           l.can_manage ? el('button', { class: 'btn ghost small', type: 'button', onclick: () => { pwRow.classList.toggle('hidden'); pwRow.querySelector('input').focus(); } }, t('reset_password')) : '',
@@ -597,7 +616,7 @@
     $('leaderForm').addEventListener('submit', async (ev) => {
       ev.preventDefault();
       const f = new FormData(ev.target);
-      try { await api('/api/leaders', 'POST', { username: f.get('username'), password: f.get('password'), display_name: f.get('display_name'), role: f.get('role') || 'leader' }); ev.target.reset(); msg(t('saved'), true); await loadLeaders(); await loadScouts(); }
+      try { await api('/api/leaders', 'POST', { username: f.get('username'), password: f.get('password'), display_name: f.get('display_name'), role: f.get('role') }); ev.target.reset(); msg(t('saved'), true); await loadLeaders(); await loadScouts(); }
       catch (e) { fail(e); }
     });
     $('pwForm').addEventListener('submit', async (ev) => {
@@ -609,7 +628,7 @@
 
     // ---------- login / boot ----------
     async function enter(username, role, troop, look) {
-      me = username; myRole = role || 'leader'; myTroop = troop ?? null;
+      me = username; myRole = role || 'admin'; myPerms = look?.perms || []; myTroop = troop ?? null;
       let saved = null; try { saved = parseInt(localStorage.getItem('leaderTroop'), 10) || null; } catch { /* ignore */ }
       state.troop = myTroop; // the super admin has none yet: the first request below uses the first troop until one is chosen
       if (!isSuper()) applyTheme(look?.theme, { en: look?.brand_en, ar: look?.brand_ar });

@@ -127,6 +127,7 @@
   "title_leader": "Scout Troop 2",
   "acct_super_admin": "Super admin",
   "acct_admin": "Admin",
+  "acct_mod": "Mod",
   "acct_leader": "Leader",
   "account_type": "Account type",
   "reset_password": "Reset password",
@@ -185,5 +186,9 @@
   "audit_patrol_delete": "deleted {unit_l}",
   "audit_scout_patrol": "changed {unit_l} of",
   "patrol_fixed": "pre-made, always first",
-  "patrol_leaders_note": "Leader accounts always stay in this group."
+  "patrol_leaders_note": "Leader accounts always stay in this group.",
+  "perm_view_log": "See the leader activity log",
+  "perm_manage_accounts": "Add accounts, delete them and reset passwords",
+  "role_perms": "Permissions this role gives",
+  "role_perms_hint": "Accounts whose scout profile has this role get these permissions. You can only give or take away permissions you hold yourself."
 }

@@ -89,8 +89,8 @@
     }
     function useTroopWord(id) {
       const th = troops.find((x) => x.id === id)?.theme;
-      if (th) { try { localStorage.setItem('unit_theme_' + id, th); } catch { /* ignore */ } setUnitTheme(th); }
-      else { let c = null; try { c = localStorage.getItem('unit_theme_' + id); } catch { /* ignore */ } setUnitTheme(c); }
+      if (th) { try { localStorage.setItem('unit_theme_' + id, th); } catch { /* ignore */ } setUnitTheme(th); setTroopTint(th); }
+      else { let c = null; try { c = localStorage.getItem('unit_theme_' + id); } catch { /* ignore */ } setUnitTheme(c); setTroopTint(c); }
     }
     async function switchTroop(id, keepScout) {
       troop = id; try { localStorage.setItem('troop', id); } catch { /* ignore */ }

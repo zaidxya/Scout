@@ -111,6 +111,10 @@ DO $$ BEGIN
 END $$;
 
 -- activities and roles/tags are separate for each troop (older databases had one shared list; startup copies it per troop)
+-- roles can carry permissions (view_log, manage_accounts); assigned to a role when it is created
+ALTER TABLE labels ADD COLUMN IF NOT EXISTS permissions TEXT[] NOT NULL DEFAULT '{}';
+-- every account is an admin (the old 'leader' type was migrated); new accounts default to it
+ALTER TABLE leaders ALTER COLUMN role SET DEFAULT 'admin';
 ALTER TABLE activities ADD COLUMN IF NOT EXISTS troop_id INT REFERENCES troops(id) ON DELETE CASCADE;
 ALTER TABLE labels ADD COLUMN IF NOT EXISTS troop_id INT REFERENCES troops(id) ON DELETE CASCADE;
 -- patrols (called "رهط" in the Rovers troop in the interface): each troop splits its scouts into its own patrols
@@ -129,3 +133,7 @@ ALTER TABLE scouts ADD COLUMN IF NOT EXISTS patrol_id INT REFERENCES patrols(id)
 CREATE INDEX IF NOT EXISTS scouts_patrol_idx ON scouts(patrol_id);
 CREATE INDEX IF NOT EXISTS activities_troop_idx ON activities(troop_id);
 CREATE INDEX IF NOT EXISTS labels_troop_idx ON labels(troop_id);
+
+-- account level "mod" (مسؤول): sees only the members and their activity
+ALTER TABLE leaders DROP CONSTRAINT IF EXISTS leaders_role_check;
+ALTER TABLE leaders ADD CONSTRAINT leaders_role_check CHECK (role IN ('super_admin', 'admin', 'leader', 'mod'));

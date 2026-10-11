@@ -33,6 +33,17 @@ function tu(key) {
   return t(key).replaceAll('{unit_l}', one.toLowerCase()).replaceAll('{units_l}', many.toLowerCase()).replaceAll('{unit}', one).replaceAll('{units}', many);
 }
 // elements marked data-unit="key" are filled with the troop's own word (call again after a language or troop change)
+// Public dashboard only: the page keeps the main purple identity; just the patrol headings, XP chips, selected row and
+// initial-letter avatars wear the colour of the troop being looked at (custom properties --troop*, separate from --primary).
+const TROOP_TINT = { // theme key -> [strong, accent, soft], the same colours as the theme blocks in style.css
+  rovers: ['#4a0313', '#d3ad80', '#f0e3d1'], forest: ['#1d5c3f', '#b9d3bd', '#e8f1e8'], forest_girls: ['#1d5c3f', '#b9d3bd', '#e8f1e8'],
+  ocean: ['#14507a', '#b7d4e8', '#e6f1f8'], yellow: ['#a86f00', '#f3dc8a', '#fdf4d3'], yellow_hannabies: ['#a86f00', '#f3dc8a', '#fdf4d3'],
+  red: ['#c62828', '#f2b9b3', '#fdeceb'], red_advanced: ['#c62828', '#f2b9b3', '#fdeceb'], white: ['#2d2d2d', '#d9d9de', '#f3f3f5'],
+};
+function setTroopTint(key) {
+  const s = document.documentElement.style, c = TROOP_TINT[key];
+  ['--troop', '--troop-accent', '--troop-soft'].forEach((v, i) => (c ? s.setProperty(v, c[i]) : s.removeProperty(v))); // no tint = main purple
+}
 const paintUnits = () => document.querySelectorAll('[data-unit]').forEach((n) => { n.textContent = tu(n.dataset.unit); });
 const patrolName = (p) => (state.lang === 'ar' ? p.name_ar : p.name_en);
 

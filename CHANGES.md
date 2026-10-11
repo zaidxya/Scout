@@ -212,3 +212,15 @@ The English labels were left as they were (for example "Dashboard" and "Leader a
 - **Other scouts can still be put in it by hand** (for example a leader who has no account) from the scout's patrol picker.
 - New troops get it when they are created, existing troops on the next startup. Because every troop now has this patrol, the scout lists are grouped from the start: the leaders under قيادة الفرقة and the other scouts under "No patrol" until you create patrols for them.
 
+## Admins only, and roles with permissions
+- **The "leader" account type is gone.** On the next startup every leader account becomes an admin. There are now two levels: the super admin and admins. New accounts are always admins.
+- **Admins can no longer** add accounts, delete accounts, reset passwords, or see the leader activity log. (The Leaders and Log tabs are hidden for them and the server refuses these actions.)
+- **Admins can now** add and delete their troop's activities (the XP list) and create, edit and delete roles and tags for their troop. Both were super admin only. The Roles & tags tab is therefore visible to every admin.
+- **Roles carry permissions.** A role gets permissions when it is created: `view_log` (see the leader activity log) and `manage_accounts` (add accounts, delete them, reset passwords). They can also be changed later with the checkboxes under each role. An account's permissions are the union of the roles on its scout profile; the super admin has all. Safeguards: you can only give or take away a permission you hold yourself (creating or editing a role, and giving or removing a role from a scout); roles with permissions you lack are hidden from your role picker and can't be deleted by you; an account with `manage_accounts` can only delete or reset accounts of its own troop that hold no permission it lacks, never the super admin and never itself.
+- **Permissions refresh** when the account logs in again or reloads the page (the server always checks the current roles, so a removed permission stops working at once).
+- Files touched: `schema.sql` (`labels.permissions`, default account type), `server.js`, `public/leader.html`, `public/style.css`, both language files, `README.md`.
+
+
+## Troop colour on the public dashboard
+- The dashboard stays purple. Only the patrol headings (مجلس الشرف included), XP chips, the selected row and initial-letter avatars (shown when a scout has no photo) take the colour of the troop being viewed. Troops with the default theme stay purple.
+- Done with separate `--troop*` variables (set by `setTroopTint()` in common.js, from the troop's theme), so the main theme and the leader area are untouched.

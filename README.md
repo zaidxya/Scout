@@ -31,16 +31,21 @@ The header shows the logged-in leader's username next to the "القيادة" ti
 | Tags | no | yes |
 | Full name, phone, join date, date of birth, address, guardian name and phone, medical notes, other notes | no | yes |
 
-## Account levels and password reset
+## Account levels, permissions and password reset
 
-| Level | Can add/delete leaders | Can reset others' passwords |
-|---|---|---|
-| **Super admin** (exactly one: the account created from `LEADER_USERNAME`; belongs to no troop and can switch between all of them) | yes, in any troop (the one selected in the switcher), including admins | yes, for admins and leaders |
-| **Admin** (created by the super admin) | leaders of their own troop only | leaders of their own troop only |
-| **Leader** | no (the Leaders tab only shows "change my password") | no |
+There are two account levels: the **super admin** (exactly one: the account created from `LEADER_USERNAME`; belongs to no troop and can switch between all of them) and **admins** (every other account; they belong to one troop). The old "leader" level no longer exists: existing leader accounts were turned into admins on startup.
+
+An admin can do the everyday work in their own troop: add, edit and delete scouts, award and undo XP, add and delete the troop's activities, create roles and tags and assign them, manage patrols, and change their own password. An admin **cannot** add, delete or reset the password of other accounts, and cannot see the leader activity log, unless a **role** gives them that.
+
+**Roles carry permissions.** When a role is created (Roles & tags tab) it can be given permissions: *see the leader activity log* and *add accounts, delete them and reset passwords*. An account gets the permissions of every role that is on its scout profile (the permissions show up after its next login or page reload). The super admin has all of them. Nobody can give or take away a permission they don't hold themselves, so an admin can't hand out a role stronger than their own; an account with the accounts permission can only delete or reset accounts of its own troop that hold no permission it lacks, never the super admin, and never itself.
+
+| Level / permission | Add and delete accounts | Reset others' passwords | See the activity log |
+|---|---|---|---|
+| **Super admin** | yes, in any troop (the one selected in the switcher) | yes, for everyone | yes |
+| **Admin** | only with a role that gives *accounts* | same | only with a role that gives *log* |
 
 The super admin can't be deleted, and nobody can delete their own account. Every check is enforced on the server, not only hidden in the page.
-Existing databases are upgraded automatically on startup: the `LEADER_USERNAME` account (otherwise the oldest account) becomes the super admin and everyone else stays a leader.
+Existing databases are upgraded automatically on startup: the `LEADER_USERNAME` account (otherwise the oldest account) becomes the super admin and everyone else becomes an admin.
 
 **Resetting a password**
 - A leader or admin who forgot theirs: the super admin (or an admin, for leaders) opens the **Leaders** tab and presses *Reset password* next to the account.
