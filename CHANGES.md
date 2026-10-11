@@ -224,3 +224,11 @@ The English labels were left as they were (for example "Dashboard" and "Leader a
 ## Troop colour on the public dashboard
 - The dashboard stays purple. Only the patrol headings (مجلس الشرف included), XP chips, the selected row and initial-letter avatars (shown when a scout has no photo) take the colour of the troop being viewed. Troops with the default theme stay purple.
 - Done with separate `--troop*` variables (set by `setTroopTint()` in common.js, from the troop's theme), so the main theme and the leader area are untouched.
+
+## Mods and patrols; أرهاط
+- Mods (مسؤول) can now add, rename and delete patrols (the pre-made leaders' patrol stays fixed) and put scouts in them. They still have no access to activities, roles/tags, troops, accounts or the log.
+- In Rovers-themed troops the patrols menu/title now reads «أرهاط» (was «الرهوط»).
+
+## Show/hide password
+- Every password field (login, add account, reset password, change password) has a Show/Hide button (إظهار / إخفاء).
+- Scripts, styles and language files are now always revalidated by the browser (were cached for 5 minutes), so updates show up immediately.

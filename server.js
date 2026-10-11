@@ -29,7 +29,7 @@ app.use(express.static(path.join(__dirname, 'public'), {
     // pages are always re-checked (cheap 304 when unchanged); scripts, styles and language files are reused for 5 minutes;
     // the logo and icons almost never change, so they're kept for a week
     if (/\.html$/i.test(file)) res.setHeader('Cache-Control', 'no-cache');
-    else if (/\.(js|css|json)$/i.test(file)) res.setHeader('Cache-Control', 'public, max-age=300');
+    else if (/\.(js|css|json)$/i.test(file)) res.setHeader('Cache-Control', 'no-cache'); // always revalidate (ETag), so an update shows up at once
     else if (/\.(png|jpe?g|ico|svg|woff2?)$/i.test(file)) res.setHeader('Cache-Control', 'public, max-age=604800');
   },
 }));
@@ -103,7 +103,7 @@ const requireLeader = wrap(async (req, res, next) => {
 });
 // only the super admin and admins may manage leader accounts
 const isAdmin = (l) => l.role === 'super_admin' || l.role === 'admin';
-// a mod (مسؤول) only has the members and their activity: everything that sets up the troop (activities, patrols, roles/tags and who holds them) is closed to it
+// a mod (مسؤول) works with the members, their activity and the patrols: the rest of the troop's setup (activities, roles/tags and who holds them) is closed to it
 const requireNotMod = (req, res, next) => (req.leader.role === 'mod' ? bad(res, 'forbidden', 403) : next());
 const requireAdmin = (req, res, next) => (isAdmin(req.leader) ? next() : bad(res, 'forbidden', 403));
 // the super admin alone: the troops themselves
@@ -302,14 +302,14 @@ const patrolNames = (b) => {
   return [en || ar, ar || en];
 };
 
-app.post('/api/patrols', requireLeader, requireAdmin, wrap(async (req, res) => {
+app.post('/api/patrols', requireLeader, wrap(async (req, res) => {
   const [en, ar] = patrolNames(req.body);
   const { rows } = await pool.query('INSERT INTO patrols (troop_id, name_en, name_ar) VALUES ($1,$2,$3) RETURNING id, name_en, name_ar', [req.troop, en, ar]);
   audit(req.leader, 'patrol_add', { name: en }, req.troop);
   res.status(201).json(rows[0]);
 }));
 
-app.put('/api/patrols/:id', requireLeader, requireAdmin, wrap(async (req, res) => {
+app.put('/api/patrols/:id', requireLeader, wrap(async (req, res) => {
   const [en, ar] = patrolNames(req.body);
   const cur = (await pool.query('SELECT is_leadership FROM patrols WHERE id = $1 AND troop_id = $2', [intId(req.params.id), req.troop])).rows[0];
   if (!cur) return bad(res, 'not_found', 404);
@@ -319,14 +319,14 @@ app.put('/api/patrols/:id', requireLeader, requireAdmin, wrap(async (req, res) =
   res.json({ ok: true });
 }));
 
-app.delete('/api/patrols/:id', requireLeader, requireAdmin, wrap(async (req, res) => {
+app.delete('/api/patrols/:id', requireLeader, wrap(async (req, res) => {
   // its scouts stay in the troop and simply end up without a patrol
   const { rows } = await pool.query('DELETE FROM patrols WHERE id = $1 AND troop_id = $2 AND NOT is_leadership RETURNING name_en', [intId(req.params.id), req.troop]); // the leaders' patrol can't be deleted
   if (rows[0]) audit(req.leader, 'patrol_delete', { name: rows[0].name_en }, req.troop);
   res.json({ ok: true });
 }));
 
-app.put('/api/scouts/:id/patrol', requireLeader, requireNotMod, wrap(async (req, res) => {
+app.put('/api/scouts/:id/patrol', requireLeader, wrap(async (req, res) => {
   const id = intId(req.params.id);
   const sc = await scoutFor(req, id);
   if (!sc) return bad(res, 'not_found', 404);

@@ -220,3 +220,21 @@ function confirmBox(message, okLabel) {
     dlg.querySelector('[data-r="0"]').focus(); // safe default: Cancel
   });
 }
+
+// ---- show/hide button on every password field (also on fields the page adds later, like the reset-password row) ----
+(() => {
+  const label = (b) => { const shown = b.previousElementSibling?.type === 'text'; b.textContent = t(shown ? 'hide_password' : 'show_password'); b.setAttribute('aria-pressed', String(shown)); };
+  const wrap = (input) => {
+    if (input.dataset.pw) return;
+    input.dataset.pw = '1';
+    const box = document.createElement('span'); box.className = 'pw-wrap';
+    const btn = document.createElement('button'); btn.type = 'button'; btn.className = 'pw-toggle'; btn.tabIndex = -1;
+    input.replaceWith(box); box.append(input, btn);
+    btn.addEventListener('click', () => { input.type = input.type === 'password' ? 'text' : 'password'; label(btn); input.focus(); });
+    label(btn);
+  };
+  const scan = () => document.querySelectorAll('input[type=password]:not([data-pw])').forEach(wrap);
+  new MutationObserver(scan).observe(document.documentElement, { childList: true, subtree: true });
+  document.addEventListener('DOMContentLoaded', scan);
+  document.addEventListener('langchange', () => document.querySelectorAll('.pw-toggle').forEach(label));
+})();

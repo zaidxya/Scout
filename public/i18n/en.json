@@ -127,6 +127,8 @@
   "title_leader": "Scout Troop 2",
   "acct_super_admin": "Super admin",
   "acct_admin": "Admin",
+  "show_password": "Show",
+  "hide_password": "Hide",
   "acct_mod": "Mod",
   "acct_leader": "Leader",
   "account_type": "Account type",

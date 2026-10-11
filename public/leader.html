@@ -191,8 +191,8 @@
     const can = (p) => isSuper() || myPerms.includes(p);
     const TABS = ['scouts', 'activities', 'patrols', 'labels', 'troops', 'leaders', 'log', 'password'];
     // tabs that need more than the basics: the troops are for the super admin only, the other two need a permission (given through a role)
-    const isMod = () => myRole === 'mod'; // a mod (مسؤول) only has the members and their activity (and its own password)
-    const tabAllowed = (n) => isMod() ? (n === 'scouts' || n === 'password') : (n === 'troops' ? isSuper() : n === 'leaders' ? can('manage_accounts') : n === 'log' ? can('view_log') : true);
+    const isMod = () => myRole === 'mod'; // a mod (مسؤول) has the members, their activity and the patrols (and its own password)
+    const tabAllowed = (n) => isMod() ? (n === 'scouts' || n === 'patrols' || n === 'password') : (n === 'troops' ? isSuper() : n === 'leaders' ? can('manage_accounts') : n === 'log' ? can('view_log') : true);
 
     const msg = (text, ok) => { $('toast').textContent = text || ''; $('toast').className = 'error' + (ok ? ' ok' : ''); };
     const fail = (e) => { if (e.status === 401 && e.code === 'unauthorized') show(false); msg(errText(e)); };
@@ -376,7 +376,7 @@
       const lead = patrols.find((p) => p.is_leadership);
       const patrolBlock = patrols.length ? el('div', { style: 'margin-bottom:.9rem' }, el('h3', {}, tu('patrol_select')),
         isLeaderScout && lead ? el('p', { style: 'margin:.2rem 0' }, el('span', { class: 'chip role' }, patrolName(lead)), ' ', el('small', { class: 'hint' }, t('patrol_leaders_note'))) : patrolPick) : '';
-      const labelsPanel = isMod() ? '' : el('div', { class: 'panel' }, patrolBlock, labelBlock('role', 'roles'), labelBlock('tag', 'tags'));
+      const labelsPanel = el('div', { class: 'panel' }, patrolBlock, isMod() ? '' : [labelBlock('role', 'roles'), labelBlock('tag', 'tags')]);
 
       // photo
       const file = el('input', { type: 'file', accept: 'image/*', class: 'hidden' });

@@ -418,3 +418,9 @@ header .brand.notext span { display: none; }
 :root:not([data-theme]) .scout-list button[aria-current=true] { background: var(--troop-soft, var(--accent-soft)); box-shadow: inset 4px 0 0 var(--troop, var(--primary)); }
 :root:not([data-theme])[dir=rtl] .scout-list button[aria-current=true] { box-shadow: inset -4px 0 0 var(--troop, var(--primary)); }
 :root .avatar.initial { background: var(--troop-accent, var(--accent)); color: var(--troop, var(--primary)); }
+
+/* show/hide button inside password fields */
+.pw-wrap { position: relative; display: block; }
+.row > .pw-wrap { flex: 1; min-width: 8rem; }
+.pw-wrap input { width: 100%; padding-inline-end: 4.2rem; }
+.pw-toggle { position: absolute; inset-block: 0; inset-inline-end: .4rem; margin: auto 0; height: 1.8rem; border: 0; background: none; color: var(--primary); font: inherit; font-size: .8rem; font-weight: 700; cursor: pointer; padding: 0 .4rem; }
