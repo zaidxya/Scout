@@ -171,7 +171,8 @@ function renderScoutList(ul, scouts, selectedId, onSelect, extra, emptyKey = 'no
       avatar(s), el('span', { class: 'nm' }, s.name, extra ? extra(s) : ''), el('span', { class: 'xp' + (s.total_xp < 0 ? ' neg' : '') }, `${fmt(s.total_xp)} ${t('xp')}`)));
   if (!patrols.length) { scouts.forEach((s) => ul.append(row(s))); return; }
   const group = (title, list) => { if (list.length) ul.append(el('li', { class: 'group-head' }, el('span', {}, title), el('small', {}, fmt(list.length))), ...list.map(row)); };
-  patrols.forEach((p) => group(patrolName(p), scouts.filter((s) => s.patrol_id === p.id)));
+  // leader accounts (in_council) are in the leaders' patrol as well as their own patrol, so they are listed under both
+  patrols.forEach((p) => group(patrolName(p), scouts.filter((s) => s.patrol_id === p.id || (p.is_leadership && s.in_council))));
   const ids = new Set(patrols.map((p) => p.id));
   group(tu('no_patrol'), scouts.filter((s) => !ids.has(s.patrol_id)));
 }

@@ -102,7 +102,7 @@ The free Render tier sleeps when idle, so the first visit after a quiet spell ca
 ## API summary
 
 - **Public:** `GET /api/scouts`, `GET /api/scouts/:id` (both include the scout's roles, never tags), `GET /api/scouts/:id/photo`
-- **Auth:** `POST /api/login`, `POST /api/logout`, `GET /api/me`, `PUT /api/me/password`
+- **Auth:** `POST /api/login`, `POST /api/logout`, `GET /api/me`, `PUT /api/me/account` (own username and/or password)
 - **Leader only:**
   - Scouts: `POST /api/scouts`, `PUT /api/scouts/:id`, `DELETE /api/scouts/:id`, `GET /api/leader/scouts/:id` (private details), `PUT` and `DELETE /api/scouts/:id/photo`
   - XP: `POST /api/scouts/:id/xp`, `DELETE /api/xp/:id`

@@ -151,11 +151,16 @@
 
       <div id="tab-password" class="hidden">
         <form id="pwForm" class="panel">
-          <h2 data-i18n="change_password"></h2>
+          <h2 data-i18n="my_account"></h2>
+          <label><span data-i18n="username"></span><input id="myUsername" name="username" type="text" autocomplete="username" pattern="[A-Za-z0-9_.\-]{3,40}" required></label>
+          <h3 data-i18n="change_password"></h3>
+          <p class="hint" data-i18n="pw_optional_hint"></p>
           <div class="grid2">
-            <label><span data-i18n="current_password"></span><input name="current" type="password" autocomplete="current-password" required></label>
-            <label><span data-i18n="new_password"></span><input name="next" type="password" autocomplete="new-password" minlength="8" required></label>
+            <label><span data-i18n="new_password"></span><input name="next" type="password" autocomplete="new-password" minlength="8"></label>
+            <label><span data-i18n="confirm_password"></span><input name="confirm" type="password" autocomplete="new-password" minlength="8"></label>
           </div>
+          <label><span data-i18n="current_password"></span><input name="current" type="password" autocomplete="current-password" required></label>
+          <p class="hint" data-i18n="current_pw_hint"></p>
           <button class="btn" type="submit" data-i18n="save"></button>
         </form>
       </div>
@@ -171,6 +176,7 @@
               <label><span data-i18n="password"></span><input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
             </div>
             <p class="hint" data-i18n="pw_hint"></p>
+            <p class="hint" data-unit="account_patrol_hint"></p>
             <label><span data-i18n="account_type"></span><select name="role"><option value="admin" data-i18n="acct_admin"></option><option value="mod" data-i18n="acct_mod"></option></select></label>
             <label><span data-i18n="display_name"></span><input name="display_name" type="text" maxlength="60"></label>
             <p class="hint" data-i18n="display_name_hint"></p>
@@ -367,15 +373,17 @@
       };
       // patrol (only when the troop has any)
       const myPatrol = (scouts.find((s) => s.id === data.id) || {}).patrol_id ?? null;
+      const meScout = scouts.find((s) => s.id === data.id) || {};
+      // accounts must belong to a patrol (no empty choice); the super admin is never in the leaders' patrol
+      const acctScout = meScout.is_leader && !meScout.is_super; // admin/mod accounts: in the leaders' patrol automatically; a regular patrol is optional and chosen here
+      const pickable = patrols.filter((p) => !p.is_leadership || (!meScout.is_super && !acctScout)); // neither the super admin nor an account is picked into the leaders' patrol
       const patrolPick = el('select', { 'aria-label': tu('patrol_select') }, el('option', { value: '' }, tu('no_patrol')),
-        patrols.map((p) => el('option', { value: p.id, ...(p.id === myPatrol ? { selected: '' } : {}) }, patrolName(p))));
+        pickable.map((p) => el('option', { value: p.id, ...(p.id === myPatrol ? { selected: '' } : {}) }, patrolName(p))));
       patrolPick.addEventListener('change', async () => {
         try { await api(`/api/scouts/${data.id}/patrol`, 'PUT', { patrol_id: patrolPick.value ? Number(patrolPick.value) : null }); msg(''); await refresh(); } catch (e) { fail(e); }
       });
-      const isLeaderScout = !!(scouts.find((s) => s.id === data.id) || {}).is_leader; // leader accounts always stay in the leaders' patrol
-      const lead = patrols.find((p) => p.is_leadership);
       const patrolBlock = patrols.length ? el('div', { style: 'margin-bottom:.9rem' }, el('h3', {}, tu('patrol_select')),
-        isLeaderScout && lead ? el('p', { style: 'margin:.2rem 0' }, el('span', { class: 'chip role' }, patrolName(lead)), ' ', el('small', { class: 'hint' }, t('patrol_leaders_note'))) : patrolPick) : '';
+        patrolPick, acctScout ? el('small', { class: 'hint' }, tu('patrol_account_note')) : '') : '';
       const labelsPanel = el('div', { class: 'panel' }, patrolBlock, isMod() ? '' : [labelBlock('role', 'roles'), labelBlock('tag', 'tags')]);
 
       // photo
@@ -622,9 +630,15 @@
     $('pwForm').addEventListener('submit', async (ev) => {
       ev.preventDefault();
       const f = new FormData(ev.target);
-      try { await api('/api/me/password', 'PUT', { current: f.get('current'), next: f.get('next') }); ev.target.reset(); msg(t('saved'), true); }
-      catch (e) { fail(e); }
+      if ((f.get('next') || '') !== (f.get('confirm') || '')) return msg(t('err_password_mismatch'));
+      try {
+        const r = await api('/api/me/account', 'PUT', { username: f.get('username'), current: f.get('current'), next: f.get('next'), confirm: f.get('confirm') });
+        me = r.username; show(true); fillMyUsername();
+        ['current', 'next', 'confirm'].forEach((n) => { ev.target.elements[n].value = ''; });
+        msg(t('saved'), true);
+      } catch (e) { fail(e); }
     });
+    const fillMyUsername = () => { const i = $('myUsername'); if (i) i.value = me; };
 
     // ---------- login / boot ----------
     async function enter(username, role, troop, look) {
@@ -632,7 +646,7 @@
       let saved = null; try { saved = parseInt(localStorage.getItem('leaderTroop'), 10) || null; } catch { /* ignore */ }
       state.troop = myTroop; // the super admin has none yet: the first request below uses the first troop until one is chosen
       if (!isSuper()) applyTheme(look?.theme, { en: look?.brand_en, ar: look?.brand_ar });
-      show(true); applyRole(); showTab('scouts'); drawLeaders();
+      show(true); applyRole(); showTab('scouts'); drawLeaders(); fillMyUsername();
       try {
         troops = await api('/api/troops');
         chooseTroop(isSuper() ? saved : myTroop); // the super admin starts in the troop they used last; everyone else in their own

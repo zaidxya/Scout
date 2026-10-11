@@ -232,3 +232,10 @@ The English labels were left as they were (for example "Dashboard" and "Leader a
 ## Show/hide password
 - Every password field (login, add account, reset password, change password) has a Show/Hide button (إظهار / إخفاء).
 - Scripts, styles and language files are now always revalidated by the browser (were cached for 5 minutes), so updates show up immediately.
+
+## Leader accounts: in the leaders' patrol automatically, plus (optionally) their own patrol
+- Every admin and mod account is automatically in the leaders' patrol (مجلس الشرف / قيادة الفرقة) and is listed under it. A new account has no regular patrol: the Add account form has no patrol field. A regular patrol (رهط) can be set later from the scout's page (the leaders' patrol itself can't be picked); the account is then listed under both.
+- The super admin is never in the leaders' patrol (removed from it on startup; the server refuses to put them there).
+
+## My account: change username and password
+- The last tab is now **My account / حسابي**: every account (admin, mod, super admin) can change its own username and/or password. The current password is always required to confirm; a new password has to be typed twice (checked on the page and on the server). The username must be unused; the session stays logged in. Renames are written to the activity log.

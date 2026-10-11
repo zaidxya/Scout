@@ -179,15 +179,29 @@ app.post('/api/logout', wrap(async (req, res) => {
 }));
 app.get('/api/me', requireLeader, wrap(async (req, res) => res.json({ username: req.leader.username, role: req.leader.role, troop_id: req.leader.troop_id, perms: [...req.perms], ...(await troopLook(req.leader.troop_id)) })));
 
-app.put('/api/me/password', requireLeader, wrap(async (req, res) => {
-  const { current, next } = req.body || {};
-  if (typeof next !== 'string' || next.length < 8 || next.length > 200) return bad(res, 'weak_password');
+// own account: change the username and/or the password (the current password is always required; a new password must be typed twice)
+app.put('/api/me/account', requireLeader, wrap(async (req, res) => {
+  const { current, next, confirm } = req.body || {};
+  const want = req.body?.username == null ? req.leader.username : String(req.body.username).trim().toLowerCase();
+  if (!/^[a-z0-9_.-]{3,40}$/.test(want)) throw invalid();
+  const hasNext = typeof next === 'string' && next !== '';
+  if (hasNext && (next.length < 8 || next.length > 200)) return bad(res, 'weak_password');
+  if (hasNext && next !== confirm) return bad(res, 'password_mismatch');
   const { rows } = await pool.query('SELECT password_hash FROM leaders WHERE id = $1', [req.leader.id]);
   if (typeof current !== 'string' || !(await bcrypt.compare(current, rows[0].password_hash))) return bad(res, 'wrong_password', 403);
-  await pool.query('UPDATE leaders SET password_hash = $1 WHERE id = $2', [await bcrypt.hash(next, 12), req.leader.id]);
-  audit(req.leader, 'password_change');
-  res.json({ ok: true });
+  const renamed = want !== req.leader.username;
+  try {
+    await pool.query('UPDATE leaders SET username = $1, password_hash = COALESCE($2, password_hash) WHERE id = $3',
+      [want, hasNext ? await bcrypt.hash(next, 12) : null, req.leader.id]);
+  } catch (e) {
+    if (e.code === '23505') return bad(res, 'username_taken', 409);
+    throw e;
+  }
+  if (renamed) audit(req.leader, 'username_change', { name: want });
+  if (hasNext) audit({ ...req.leader, username: want }, 'password_change');
+  res.json({ ok: true, username: want });
 }));
+
 
 // roles are public (tags stay leader-only); used by the public list and detail queries (alias s = scouts)
 const ROLES_JSON = `COALESCE((SELECT json_agg(json_build_object('id', l.id, 'name_en', l.name_en, 'name_ar', l.name_ar, 'color', l.color)
@@ -243,7 +257,7 @@ app.get('/api/scouts', wrap(async (req, res) => {
   let troop = parseInt(req.query.troop, 10);
   if (!Number.isInteger(troop)) troop = (await pool.query('SELECT MIN(id) AS id FROM troops')).rows[0].id; // no troop given: the first one
   const { rows } = await pool.query(
-    `SELECT s.id, s.name, s.patrol_id, s.photo_v, (s.photo IS NOT NULL) AS has_photo, COALESCE(x.total, 0)::int AS total_xp, ${ROLES_JSON}
+    `SELECT s.id, s.name, s.patrol_id, s.photo_v, (s.photo IS NOT NULL) AS has_photo, COALESCE(x.total, 0)::int AS total_xp, EXISTS (SELECT 1 FROM leaders l WHERE l.scout_id = s.id AND l.role <> 'super_admin') AS in_council, ${ROLES_JSON}
      FROM scouts s LEFT JOIN (SELECT scout_id, SUM(xp) AS total FROM xp_log GROUP BY scout_id) x ON x.scout_id = s.id
      WHERE s.troop_id = $1
      ORDER BY (SELECT COALESCE(MAX(l.priority), 0) FROM scout_labels sl JOIN labels l ON l.id = sl.label_id AND l.kind = 'role' WHERE sl.scout_id = s.id) DESC, total_xp DESC, s.name`,
@@ -274,6 +288,8 @@ app.get('/api/leader/scouts', requireLeader, wrap(async (req, res) => {
     `SELECT s.id, s.name, s.troop_id, s.patrol_id, s.photo_v, (s.photo IS NOT NULL) AS has_photo, s.full_name, s.phone,
        COALESCE(x.total, 0)::int AS total_xp,
        EXISTS (SELECT 1 FROM leaders l WHERE l.scout_id = s.id) AS is_leader,
+       EXISTS (SELECT 1 FROM leaders l WHERE l.scout_id = s.id AND l.role = 'super_admin') AS is_super,
+       EXISTS (SELECT 1 FROM leaders l WHERE l.scout_id = s.id AND l.role <> 'super_admin') AS in_council,
        COALESCE((SELECT json_agg(sl.label_id) FROM scout_labels sl WHERE sl.scout_id = s.id), '[]'::json) AS label_ids
      FROM scouts s LEFT JOIN (SELECT scout_id, SUM(xp) AS total FROM xp_log GROUP BY scout_id) x ON x.scout_id = s.id
      WHERE s.troop_id = $1
@@ -330,13 +346,15 @@ app.put('/api/scouts/:id/patrol', requireLeader, wrap(async (req, res) => {
   const id = intId(req.params.id);
   const sc = await scoutFor(req, id);
   if (!sc) return bad(res, 'not_found', 404);
-  // leader accounts always stay in the leaders' patrol
-  if ((await pool.query('SELECT 1 FROM leaders WHERE scout_id = $1', [id])).rowCount) return bad(res, 'forbidden', 403);
+  // an account (admin / mod) is in the leaders' patrol automatically and may also be put in a regular patrol; the super admin is never in the leaders' patrol
+  const acct = (await pool.query('SELECT role FROM leaders WHERE scout_id = $1', [id])).rows[0];
   const pid = req.body?.patrol_id == null || req.body.patrol_id === '' ? null : intId(req.body.patrol_id);
   let name = null;
   if (pid !== null) {
-    const p = await pool.query('SELECT name_en FROM patrols WHERE id = $1 AND troop_id = $2', [pid, sc.troop_id]); // only a patrol of the scout's own troop
+    const p = await pool.query('SELECT name_en, is_leadership FROM patrols WHERE id = $1 AND troop_id = $2', [pid, sc.troop_id]); // only a patrol of the scout's own troop
     if (!p.rows[0]) return bad(res, 'not_found', 404);
+    if (acct?.role === 'super_admin' && p.rows[0].is_leadership) return bad(res, 'super_not_in_council', 400);
+    if (acct && acct.role !== 'super_admin' && p.rows[0].is_leadership) return bad(res, 'patrol_not_council', 400); // the leaders' patrol comes on top of it, not instead
     name = p.rows[0].name_en;
   }
   await pool.query('UPDATE scouts SET patrol_id = $1 WHERE id = $2', [pid, id]);
@@ -565,14 +583,16 @@ app.post('/api/leaders', requireLeader, requirePerm('manage_accounts'), wrap(asy
   const role = req.body?.role == null || req.body.role === '' ? 'admin' : req.body.role;
   if (!['admin', 'mod'].includes(role)) throw invalid();
   const display = text(req.body?.display_name, 60) || username;
+  // a new account starts in the leaders' patrol only (automatic, see in_council); its regular patrol, if any, is set later from its scout page
+  const patrolId = null;
   // new accounts join the troop being worked on (an admin's own, or the one the super admin switched to)
   const troop = req.troop;
   try {
     // one statement: creates the leader's scout profile and the leader together (or neither)
     const { rows } = await pool.query(
-      `WITH s AS (INSERT INTO scouts (name, troop_id, patrol_id) VALUES ($3, $5, (SELECT id FROM patrols WHERE troop_id = $5 AND is_leadership)) RETURNING id)
+      `WITH s AS (INSERT INTO scouts (name, troop_id, patrol_id) VALUES ($3, $5, $6::int) RETURNING id)
        INSERT INTO leaders (username, password_hash, scout_id, role, troop_id) SELECT $1::text, $2::text, id, $4::text, $5::int FROM s RETURNING id, username, role`,
-      [username, await bcrypt.hash(password, 12), display, role, troop]);
+      [username, await bcrypt.hash(password, 12), display, role, troop, patrolId]);
     audit(req.leader, 'leader_add', { name: rows[0].username }, troop);
     res.status(201).json(rows[0]);
   } catch (e) {
@@ -700,7 +720,8 @@ app.use((err, req, res, next) => {
   }
   // every troop has its pre-made leaders' patrol, and every leader account's scout profile is in it
   await pool.query('INSERT INTO patrols (troop_id, name_en, name_ar, is_leadership) SELECT t.id, $1, $2, true FROM troops t WHERE NOT EXISTS (SELECT 1 FROM patrols p WHERE p.troop_id = t.id AND p.is_leadership)', LEADERSHIP);
-  await pool.query('UPDATE scouts s SET patrol_id = p.id FROM leaders l, patrols p WHERE l.scout_id = s.id AND p.troop_id = s.troop_id AND p.is_leadership AND s.patrol_id IS DISTINCT FROM p.id');
+  // the super admin is never in the leaders' patrol (admin and mod accounts are in it automatically, see in_council)
+  await pool.query("UPDATE scouts s SET patrol_id = NULL FROM leaders l, patrols p WHERE l.scout_id = s.id AND l.role = 'super_admin' AND p.id = s.patrol_id AND p.is_leadership");
   const port = process.env.PORT || 3000;
   app.listen(port, () => console.log(`Listening on ${port}`));
 })().catch((e) => { console.error('Startup failed:', e.message); process.exit(1); });
