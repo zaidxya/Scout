@@ -17,7 +17,7 @@
   <header>
     <div class="grow"><h1><a class="brand" href="/"><img src="/logo-mark.png" alt=""><span data-i18n="title"></span></a></h1><p data-i18n="leader_area"></p><p id="meName" dir="auto" style="font-weight:700;opacity:1;padding-inline-end:1rem;border-inline-end:1px solid rgba(var(--on-primary-rgb),.4)"></p></div>
     <nav>
-      <a href="/" data-i18n="home">Dashboard</a>
+      <details class="menu" data-page="leader"></details>
       <button id="logoutBtn" type="button" class="hidden" data-i18n="logout"></button>
       <button id="langBtn" type="button" class="lang" data-i18n="lang_toggle">العربية</button>
     </nav>
@@ -56,6 +56,9 @@
           </form>
           <input id="q" type="search" data-i18n-ph="search_leader" aria-label="Search">
           <ul id="list" class="scout-list"></ul>
+          <label class="inline-check"><input id="showInactive" type="checkbox"> <span data-i18n="show_inactive"></span> <small id="inactiveCount"></small></label>
+          <h3 id="inactiveTitle" class="hidden" data-i18n="inactive_title"></h3>
+          <ul id="inactiveList" class="scout-list inactive hidden"></ul>
         </section>
         <section id="right" class="detail"></section>
       </div>
@@ -284,12 +287,18 @@
 
     function drawList() {
       const q = norm($('q').value.trim());
-      const shown = scouts.filter((s) => matches(s, q));
-      renderScoutList($('list'), shown, current, (id) => openScout(id),
+      const live = scouts.filter((s) => s.active !== false), off = scouts.filter((s) => s.active === false);
+      renderScoutList($('list'), live.filter((s) => matches(s, q)), current, (id) => openScout(id),
         (s) => el('span', { class: 'sub' }, chips(s.label_ids)),
-        scouts.length ? 'no_results' : 'no_scouts', patrols);
+        live.length ? 'no_results' : 'no_scouts', patrols);
+      // deactivated scouts (left the movement) are kept out of the list unless asked for
+      $('inactiveCount').textContent = off.length ? `(${fmt(off.length)})` : '';
+      const showOff = $('showInactive').checked && off.length > 0;
+      $('inactiveTitle').classList.toggle('hidden', !showOff); $('inactiveList').classList.toggle('hidden', !showOff);
+      if (showOff) renderScoutList($('inactiveList'), off.filter((s) => matches(s, q)), current, (id) => openScout(id), null, 'no_results');
     }
     $('q').addEventListener('input', frame(drawList));
+    $('showInactive').addEventListener('change', drawList);
 
     async function openScout(id, scrollNext = true) {
       current = id; drawList();
@@ -423,18 +432,43 @@
         catch (e) { fail(e); }
       });
 
+      // leaving the movement: deactivate (never delete); an inactive scout can be reactivated
+      const isOff = (scouts.find((s) => s.id === data.id) || {}).active === false;
       const del = el('button', { class: 'btn quiet', type: 'button', style: 'margin-top:1.5rem', onclick: async () => {
+        if (isOff) { try { await api(`/api/scouts/${data.id}/active`, 'PUT', { active: true }); msg(t('saved'), true); await refresh(); } catch (e) { fail(e); } return; }
+        if (!(await confirmBox(t('confirm_deactivate'), t('deactivate_scout')))) return;
+        try { await api(`/api/scouts/${data.id}/active`, 'PUT', { active: false }); msg(t('saved'), true); await refresh(); }
+        catch (e) { fail(e); }
+      } }, isOff ? t('reactivate_scout') : t('deactivate_scout'));
+
+      // promote: move the scout to another troop (not for leader accounts, which belong to their troop)
+      const others = troops.filter((x) => x.id !== activeTroop());
+      const isAcct = !!(scouts.find((s) => s.id === data.id) || {}).is_leader;
+      let promotePanel = '';
+      if (others.length && !isAcct) {
+        const target = el('select', { 'aria-label': t('promote_to') }, others.map((x) => el('option', { value: String(x.id) }, troopName(x))));
+        promotePanel = el('div', { class: 'panel' }, el('h3', {}, t('promote')), el('p', { class: 'hint' }, t('promote_hint')),
+          el('div', { class: 'row' }, target, el('button', { class: 'btn', type: 'button', onclick: async () => {
+            const name = troopName(troopById(Number(target.value)));
+            if (!(await confirmBox(t('confirm_promote').replace('{name}', data.name).replace('{troop}', name), t('promote')))) return;
+            try { await api(`/api/scouts/${data.id}/promote`, 'PUT', { troop_id: Number(target.value) }); msg(t('promoted'), true); current = null; data = det = null; await loadScouts(); drawDetail(); }
+            catch (e) { fail(e); }
+          } }, t('promote'))));
+      }
+      // permanent deletion is for the super admin only
+      const hardDel = !isSuper() ? '' : el('button', { class: 'btn quiet', type: 'button', style: 'margin-top:1.5rem', onclick: async () => {
         if (!(await confirmBox(t('confirm_delete'), t('delete_scout')))) return;
         try { await api('/api/scouts/' + data.id, 'DELETE'); current = null; data = det = null; await loadScouts(); drawDetail(); }
         catch (e) { fail(e); }
       } }, t('delete_scout'));
+      const offBanner = isOff ? el('p', { class: 'panel hint' }, t('inactive_note')) : '';
 
-      box.append(renderDetailHead(data, false), awardForm, labelsPanel,
+      box.append(renderDetailHead(data, false), offBanner, isOff ? '' : awardForm, labelsPanel,
         renderLog(data, async (xpId) => {
           if (!(await confirmBox(t('confirm_undo'), t('undo')))) return;
           try { await api('/api/xp/' + xpId, 'DELETE'); await refresh(); } catch (e) { fail(e); }
         }),
-        el('div', { style: 'height:1.25rem' }), form, del);
+        el('div', { style: 'height:1.25rem' }), form, promotePanel, del, hardDel);
     }
 
     $('addForm').addEventListener('submit', async (ev) => {
@@ -504,6 +538,7 @@
         case 'activity_add': return `${verb} ${ar ? m.name_ar : m.name_en} (${signed(m.xp)} ${t('xp')})`;
         case 'activity_delete': return `${verb} ${ar ? m.name_ar : m.name_en}`;
         case 'scout_patrol': return `${verb} ${m.name}${m.patrol ? ` (${m.patrol})` : ''}`;
+        case 'scout_promote': return `${verb} ${m.name} ${t('audit_to')} ${m.to}`;
         case 'login': case 'logout': case 'password_change': return verb;
         default: return `${verb} ${m.name || ''}`;
       }

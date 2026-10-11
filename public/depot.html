@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="ar" dir="rtl" data-title="title_leader">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>كشاف الفوج الثاني</title>
+  <link rel="icon" type="image/png" sizes="192x192" href="/favicon-v2.png">
+  <link rel="apple-touch-icon" href="/favicon-v2.png">
+  <meta name="theme-color" content="#671e93">
+  <script>document.documentElement.classList.add('js')</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <div class="grow"><h1><a class="brand" href="/"><img src="/logo-mark.png" alt=""><span data-i18n="title"></span></a></h1><p data-i18n="depot"></p></div>
+    <nav>
+      <details class="menu" data-page="depot"></details>
+      <button id="langBtn" type="button" class="lang" data-i18n="lang_toggle">العربية</button>
+    </nav>
+  </header>
+  <main>
+    <p id="toast" class="error" role="status"></p>
+    <div id="app">
+      <div class="panel">
+        <h2 data-i18n="depot_title"></h2>
+        <p class="hint" data-i18n="depot_hint"></p>
+        <p id="editNote" class="hint hidden" data-i18n="depot_login_note"></p>
+        <input id="q" type="search" data-i18n-ph="depot_search" aria-label="Search">
+        <p class="hint"><span data-i18n="depot_total"></span>: <b id="count"></b></p>
+        <ul id="items" class="simple-list"></ul>
+        <form id="addForm" class="hidden">
+          <h3 data-i18n="depot_add"></h3>
+          <div class="grid2">
+            <label><span data-i18n="name_en"></span><input name="name_en" type="text" maxlength="80" dir="ltr"></label>
+            <label><span data-i18n="name_ar"></span><input name="name_ar" type="text" maxlength="80" dir="rtl"></label>
+          </div>
+          <div class="grid2">
+            <label><span data-i18n="depot_quantity"></span><input name="quantity" type="number" min="0" max="1000000" step="1" required value="1"></label>
+            <label><span data-i18n="depot_notes"></span><input name="notes" type="text" maxlength="500"></label>
+          </div>
+          <button class="btn" type="submit" data-i18n="add"></button>
+        </form>
+      </div>
+    </div>
+  </main>
+  <script src="/common.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let items = [], canEdit = false, isSuper = false; // everyone reads; admins and the super admin edit; only the super admin adds
+    const msg = (text, ok) => { $('toast').textContent = text || ''; $('toast').className = 'error' + (ok ? ' ok' : ''); };
+    const fail = (e) => msg(errText(e));
+    const nm = (i) => (state.lang === 'ar' ? i.name_ar : i.name_en);
+
+    function draw() {
+      const q = norm($('q').value.trim());
+      const shown = items.filter((i) => !q || [i.name_en, i.name_ar, i.notes].some((v) => norm(v).includes(q)));
+      $('count').textContent = fmt(items.length);
+      if (!shown.length) return $('items').replaceChildren(el('li', { class: 'empty' }, t(items.length ? 'depot_no_results' : 'depot_empty')));
+      $('items').replaceChildren(...shown.map((i) => {
+        if (!canEdit) return el('li', {}, el('div', { class: 'grow' }, el('b', {}, nm(i)), i.notes ? el('small', { style: 'display:block;opacity:.75' }, i.notes) : ''), el('span', { class: 'depot-qty' }, fmt(i.quantity)));
+        const f = (n, v, type = 'text', extra = {}) => el('input', { name: n, type, value: v ?? '', 'aria-label': t(extra.label), ...extra.attrs });
+        const form = el('form', { class: 'depot-edit' },
+          f('name_en', i.name_en, 'text', { label: 'name_en', attrs: { maxlength: '80', dir: 'ltr' } }),
+          f('name_ar', i.name_ar, 'text', { label: 'name_ar', attrs: { maxlength: '80', dir: 'rtl' } }),
+          f('quantity', i.quantity, 'number', { label: 'depot_quantity', attrs: { min: '0', max: '1000000', step: '1', required: '' } }),
+          f('notes', i.notes, 'text', { label: 'depot_notes', attrs: { maxlength: '500' } }),
+          el('button', { class: 'btn small', type: 'submit' }, t('save')));
+        form.addEventListener('submit', async (ev) => {
+          ev.preventDefault();
+          const d = Object.fromEntries(new FormData(form));
+          try { await api('/api/depot/' + i.id, 'PUT', d); msg(t('saved'), true); await load(); } catch (e) { fail(e); }
+        });
+        return el('li', {}, form, el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
+          if (!(await confirmBox(t('depot_confirm_delete')))) return;
+          try { await api('/api/depot/' + i.id, 'DELETE'); await load(); } catch (e) { fail(e); }
+        } }, t('delete')));
+      }));
+    }
+    async function load() { items = await api('/api/depot'); draw(); }
+    $('q').addEventListener('input', frame(draw));
+    $('addForm').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      try { await api('/api/depot', 'POST', Object.fromEntries(new FormData(ev.target))); ev.target.reset(); ev.target.elements.quantity.value = 1; msg(t('saved'), true); await load(); } catch (e) { fail(e); }
+    });
+    document.addEventListener('langchange', draw);
+    (async () => {
+      await initLang();
+      try {
+        const me = await api('/api/me'); // not signed in -> 401 -> read-only
+        isSuper = me.role === 'super_admin'; canEdit = isSuper || me.role === 'admin';
+      } catch { /* a visitor: read-only */ }
+      $('addForm').classList.toggle('hidden', !isSuper);
+      $('editNote').classList.toggle('hidden', canEdit);
+      try { await load(); } catch (e) { fail(e); }
+    })();
+;
+  </script>
+</body>
+</html>

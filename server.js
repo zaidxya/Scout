@@ -252,6 +252,10 @@ app.delete('/api/troops/:id', requireLeader, requireSuper, wrap(async (req, res)
   res.json({ ok: true });
 }));
 
+// is the request from a signed-in leader account? (public routes use it to show deactivated scouts to leaders only)
+async function isStaff(req) {
+  try { const p = jwt.verify(req.cookies.token, SECRET); return (await pool.query('SELECT 1 FROM leaders WHERE id = $1', [p.id])).rowCount > 0; } catch { return false; }
+}
 // ---- public: dashboard data for one troop (display name, photo, roles, XP, activity) ----
 app.get('/api/scouts', wrap(async (req, res) => {
   let troop = parseInt(req.query.troop, 10);
@@ -259,7 +263,7 @@ app.get('/api/scouts', wrap(async (req, res) => {
   const { rows } = await pool.query(
     `SELECT s.id, s.name, s.patrol_id, s.photo_v, (s.photo IS NOT NULL) AS has_photo, COALESCE(x.total, 0)::int AS total_xp, EXISTS (SELECT 1 FROM leaders l WHERE l.scout_id = s.id AND l.role <> 'super_admin') AS in_council, ${ROLES_JSON}
      FROM scouts s LEFT JOIN (SELECT scout_id, SUM(xp) AS total FROM xp_log GROUP BY scout_id) x ON x.scout_id = s.id
-     WHERE s.troop_id = $1
+     WHERE s.troop_id = $1 AND s.active
      ORDER BY (SELECT COALESCE(MAX(l.priority), 0) FROM scout_labels sl JOIN labels l ON l.id = sl.label_id AND l.kind = 'role' WHERE sl.scout_id = s.id) DESC, total_xp DESC, s.name`,
     [troop]);
   res.json(rows);
@@ -267,8 +271,9 @@ app.get('/api/scouts', wrap(async (req, res) => {
 
 app.get('/api/scouts/:id', wrap(async (req, res) => {
   const id = intId(req.params.id);
-  const s = await pool.query(`SELECT s.id, s.name, s.troop_id, s.photo_v, (s.photo IS NOT NULL) AS has_photo, ${ROLES_JSON} FROM scouts s WHERE s.id = $1`, [id]);
+  const s = await pool.query(`SELECT s.id, s.name, s.troop_id, s.active, s.photo_v, (s.photo IS NOT NULL) AS has_photo, ${ROLES_JSON} FROM scouts s WHERE s.id = $1`, [id]);
   if (!s.rows[0]) return bad(res, 'not_found', 404);
+  if (!s.rows[0].active && !(await isStaff(req))) return bad(res, 'not_found', 404); // deactivated scouts are only visible to leaders
   const log = await pool.query(
     `SELECT id, activity, activity_ar, xp, note, created_at, COALESCE(activity_date, created_at::date)::text AS day
      FROM xp_log WHERE scout_id = $1 ORDER BY COALESCE(activity_date, created_at::date) DESC, created_at DESC, id DESC`, [id]);
@@ -285,7 +290,7 @@ app.get('/api/scouts/:id/photo', wrap(async (req, res) => {
 // searchable list for leaders: includes private search fields, leader flag and role/tag ids
 app.get('/api/leader/scouts', requireLeader, wrap(async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT s.id, s.name, s.troop_id, s.patrol_id, s.photo_v, (s.photo IS NOT NULL) AS has_photo, s.full_name, s.phone,
+    `SELECT s.id, s.name, s.troop_id, s.patrol_id, s.active, s.photo_v, (s.photo IS NOT NULL) AS has_photo, s.full_name, s.phone,
        COALESCE(x.total, 0)::int AS total_xp,
        EXISTS (SELECT 1 FROM leaders l WHERE l.scout_id = s.id) AS is_leader,
        EXISTS (SELECT 1 FROM leaders l WHERE l.scout_id = s.id AND l.role = 'super_admin') AS is_super,
@@ -482,7 +487,20 @@ app.put('/api/scouts/:id', requireLeader, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-app.delete('/api/scouts/:id', requireLeader, wrap(async (req, res) => {
+// leaving the movement: a scout is deactivated, never deleted (their history stays; they disappear from the public dashboard and the default lists)
+app.put('/api/scouts/:id/active', requireLeader, wrap(async (req, res) => {
+  const id = intId(req.params.id);
+  const sc = await scoutFor(req, id);
+  if (!sc) return bad(res, 'not_found', 404);
+  const active = req.body?.active === true;
+  if (!active && (await pool.query('SELECT 1 FROM leaders WHERE scout_id = $1', [id])).rows[0]) return bad(res, 'scout_is_leader', 409); // remove the account first
+  await pool.query('UPDATE scouts SET active = $1, deactivated_at = CASE WHEN $1 THEN NULL ELSE now() END WHERE id = $2', [active, id]);
+  audit(req.leader, active ? 'scout_reactivate' : 'scout_deactivate', { name: sc.name }, sc.troop_id);
+  res.json({ ok: true });
+}));
+
+// permanent deletion: the super admin only (everyone else deactivates)
+app.delete('/api/scouts/:id', requireLeader, requireSuper, wrap(async (req, res) => {
   const id = intId(req.params.id);
   const sc = await scoutFor(req, id);
   if (!sc) return res.json({ ok: true });
@@ -491,6 +509,25 @@ app.delete('/api/scouts/:id', requireLeader, wrap(async (req, res) => {
   audit(req.leader, 'scout_delete', { name: sc.name }, sc.troop_id);
   res.json({ ok: true });
 }));
+
+// promote: move a scout to another troop (XP and history go with them; the old troop's patrol, roles and tags don't apply any more)
+app.put('/api/scouts/:id/promote', requireLeader, wrap(async (req, res) => {
+  const id = intId(req.params.id);
+  const to = intId(req.body?.troop_id);
+  const sc = await scoutFor(req, id);
+  if (!sc) return bad(res, 'not_found', 404);
+  if (to === sc.troop_id) throw invalid();
+  const target = (await pool.query('SELECT name_en FROM troops WHERE id = $1', [to])).rows[0];
+  if (!target) return bad(res, 'not_found', 404);
+  if ((await pool.query('SELECT 1 FROM leaders WHERE scout_id = $1', [id])).rows[0]) return bad(res, 'scout_is_leader', 409); // accounts belong to their troop
+  await tx(async (c) => {
+    await c.query('DELETE FROM scout_labels WHERE scout_id = $1', [id]);
+    await c.query('UPDATE scouts SET troop_id = $1, patrol_id = NULL WHERE id = $2', [to, id]);
+  });
+  audit(req.leader, 'scout_promote', { name: sc.name, to: target.name_en }, sc.troop_id);
+  res.json({ ok: true });
+}));
+
 
 app.put('/api/scouts/:id/photo', requireLeader, wrap(async (req, res) => {
   const id = intId(req.params.id);
@@ -522,6 +559,7 @@ app.post('/api/scouts/:id/xp', requireLeader, wrap(async (req, res) => {
   const activityId = intId(req.body?.activity_id);
   const sc = await scoutFor(req, id);
   if (!sc) return bad(res, 'not_found', 404);
+  if (!(await pool.query('SELECT active FROM scouts WHERE id = $1', [id])).rows[0].active) return bad(res, 'scout_inactive', 409); // reactivate first
   const a = await pool.query('SELECT * FROM activities WHERE id = $1 AND troop_id = $2', [activityId, sc.troop_id]); // each troop only uses its own activities
   if (!a.rows[0]) return bad(res, 'not_found', 404);
   const act = a.rows[0];
@@ -632,6 +670,35 @@ app.get('/api/audit', requireLeader, requirePerm('view_log'), wrap(async (req, r
      FROM audit_log a LEFT JOIN troops t ON t.id = a.troop_id
      WHERE a.troop_id = $1 OR ($2::boolean AND a.troop_id IS NULL) ORDER BY a.id DESC LIMIT 300`, [req.troop, isSuper(req.leader)]);
   res.json(rows);
+}));
+
+// ---- depot (مستودع): the inventory. Everyone can read and search it; admins and the super admin edit and remove items, only the super admin adds them ----
+const depotBody = (b) => {
+  const en = text(b?.name_en, 80), ar = text(b?.name_ar, 80);
+  const quantity = Number(b?.quantity);
+  if ((!en && !ar) || !Number.isInteger(quantity) || quantity < 0 || quantity > 1000000) throw invalid();
+  return [en || ar, ar || en, quantity, text(b?.notes, 500)];
+};
+app.get('/api/depot', wrap(async (req, res) => {
+  res.json((await pool.query('SELECT id, name_en, name_ar, quantity, notes, updated_at FROM depot_items ORDER BY name_ar, id')).rows);
+}));
+app.post('/api/depot', requireLeader, requireSuper, wrap(async (req, res) => {
+  const v = depotBody(req.body);
+  const { rows } = await pool.query('INSERT INTO depot_items (name_en, name_ar, quantity, notes) VALUES ($1,$2,$3,$4) RETURNING id', v);
+  audit(req.leader, 'depot_add', { name: v[0], quantity: v[2] }, null);
+  res.status(201).json(rows[0]);
+}));
+app.put('/api/depot/:id', requireLeader, requireAdmin, wrap(async (req, res) => {
+  const v = depotBody(req.body);
+  const r = await pool.query('UPDATE depot_items SET name_en = $1, name_ar = $2, quantity = $3, notes = $4, updated_at = now() WHERE id = $5', [...v, intId(req.params.id)]);
+  if (!r.rowCount) return bad(res, 'not_found', 404);
+  audit(req.leader, 'depot_update', { name: v[0], quantity: v[2] }, null);
+  res.json({ ok: true });
+}));
+app.delete('/api/depot/:id', requireLeader, requireAdmin, wrap(async (req, res) => {
+  const { rows } = await pool.query('DELETE FROM depot_items WHERE id = $1 RETURNING name_en', [intId(req.params.id)]);
+  if (rows[0]) audit(req.leader, 'depot_delete', { name: rows[0].name_en }, null);
+  res.json({ ok: true });
 }));
 
 app.use((err, req, res, next) => {

@@ -137,3 +137,18 @@ CREATE INDEX IF NOT EXISTS labels_troop_idx ON labels(troop_id);
 -- account level "mod" (مسؤول): sees only the members and their activity
 ALTER TABLE leaders DROP CONSTRAINT IF EXISTS leaders_role_check;
 ALTER TABLE leaders ADD CONSTRAINT leaders_role_check CHECK (role IN ('super_admin', 'admin', 'leader', 'mod'));
+
+-- scouts are never deleted: leaving the movement deactivates them (hidden from the public dashboard and the default lists, history kept)
+ALTER TABLE scouts ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT true;
+ALTER TABLE scouts ADD COLUMN IF NOT EXISTS deactivated_at TIMESTAMPTZ;
+
+-- the depot (مستودع): one shared inventory; leaders read it, only the super admin changes it
+CREATE TABLE IF NOT EXISTS depot_items (
+  id SERIAL PRIMARY KEY,
+  name_en TEXT NOT NULL,
+  name_ar TEXT NOT NULL,
+  quantity INT NOT NULL DEFAULT 0 CHECK (quantity >= 0),
+  notes TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

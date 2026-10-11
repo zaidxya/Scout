@@ -239,3 +239,24 @@ function confirmBox(message, okLabel) {
   document.addEventListener('DOMContentLoaded', scan);
   document.addEventListener('langchange', () => document.querySelectorAll('.pw-toggle').forEach(label));
 })();
+
+// header dropdown menus close when you click elsewhere or press Esc
+document.addEventListener('click', (e) => document.querySelectorAll('header details.menu[open]').forEach((d) => { if (!d.contains(e.target)) d.removeAttribute('open'); }));
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') document.querySelectorAll('header details.menu[open]').forEach((d) => d.removeAttribute('open')); });
+
+// the header menu (same on every page): the button names the page you are on, the list holds the other pages
+const SITE_PAGES = { home: ['/', 'home'], leader: ['/leader.html', 'leader_area'], depot: ['/depot.html', 'depot'] };
+function paintMenu() {
+  document.querySelectorAll('header details.menu[data-page]').forEach((d) => {
+    if (!state.dict.home) return; // language file not loaded yet
+    const here = d.dataset.page;
+    let sum = d.querySelector('summary'), list = d.querySelector('.menu-list');
+    if (!sum) { sum = document.createElement('summary'); list = document.createElement('div'); list.className = 'menu-list'; d.append(sum, list); }
+    sum.textContent = t(SITE_PAGES[here][1]);
+    list.replaceChildren(...Object.entries(SITE_PAGES).filter(([k]) => k !== here).map(([, [href, key]]) => {
+      const a = document.createElement('a'); a.href = href; a.textContent = t(key); return a;
+    }));
+  });
+}
+document.addEventListener('langchange', paintMenu);
+document.addEventListener('DOMContentLoaded', paintMenu);

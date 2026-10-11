@@ -239,3 +239,14 @@ The English labels were left as they were (for example "Dashboard" and "Leader a
 
 ## My account: change username and password
 - The last tab is now **My account / حسابي**: every account (admin, mod, super admin) can change its own username and/or password. The current password is always required to confirm; a new password has to be typed twice (checked on the page and on the server). The username must be unused; the session stays logged in. Renames are written to the activity log.
+
+## Promote (ترفيع) and deactivate instead of delete
+- **Scouts are no longer deleted.** The delete button is now **Deactivate / إيقاف الكشاف** (`PUT /api/scouts/:id/active`, new columns `scouts.active`, `deactivated_at`). An inactive scout is hidden from the public dashboard and from the default leader list, keeps all their history, can't be awarded XP, and shows under "Show inactive" where they can be reactivated. Leader accounts can't be deactivated (remove the account first). The `DELETE /api/scouts/:id` route is gone.
+- **Promote / ترفيع** (`PUT /api/scouts/:id/promote`): moves a scout to another troop from their page. XP and history go with them; their patrol, roles and tags are removed (they belong to the old troop). Leader accounts can't be promoted. Logged in the activity log.
+- A troop that still has inactive scouts can't be deleted.
+- **Permanent delete is back for the super admin only** (`DELETE /api/scouts/:id`, a "Delete scout" button next to Deactivate that only the super admin sees). Everyone else can only deactivate. A leader account's scout still can't be deleted.
+
+## Depot (مستودع) and the dashboard menu
+- On the dashboard the **Leader area** button is now a drop-down menu: Leader area, **Depot / مستودع** (closes on outside click or Esc).
+- New page `/depot.html`: the depot inventory (item name in both languages, quantity, notes; searchable). **Everyone can view and search it, no sign-in needed.** Admins and the super admin can edit and delete items; **only the super admin can add items** (enforced on the server: `GET /api/depot` public, `PUT/DELETE` admin, `POST` super admin). Everyone else sees a small notice that you need to be logged in as an admin to edit (no link to the leader area). The same Leader area / Depot drop-down menu is in the header of both the dashboard and the depot page. One shared inventory (not per troop), new table `depot_items`, changes are written to the activity log.
+- The header menu is now the same on the dashboard, the leader area and the depot: the button shows the page you are on, and the list holds the other two pages (built by `paintMenu()` in `common.js`, follows the language).
