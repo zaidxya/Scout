@@ -23,7 +23,6 @@ function paintBrand() {
   brand.querySelector('span').textContent = custom || t('title');
   brand.classList.toggle('notext', !custom && !!(THEMES[look.theme] || {}).wordmark); // a wordmark logo already says the name
 }
-// the browser tab title: the troop's name inside a troop's leader area, otherwise the page's own title
 // patrols are called "patrol" / طليعة, except in the Rovers troop where Arabic says رهط; the word depends on the theme of the troop being looked at.
 // Texts use {unit} / {units} (and {unit_l} / {units_l} in lowercase for English) and go through tu() instead of t().
 let unitTheme = 'default';
@@ -32,7 +31,6 @@ function tu(key) {
   const r = unitTheme === 'rovers' ? '_r' : '', one = t('unit' + r), many = t('units' + r);
   return t(key).replaceAll('{unit_l}', one.toLowerCase()).replaceAll('{units_l}', many.toLowerCase()).replaceAll('{unit}', one).replaceAll('{units}', many);
 }
-// elements marked data-unit="key" are filled with the troop's own word (call again after a language or troop change)
 // Public dashboard only: the page keeps the main purple identity; just the patrol headings, XP chips, selected row and
 // initial-letter avatars wear the colour of the troop being looked at (custom properties --troop*, separate from --primary).
 const TROOP_TINT = { // theme key -> [strong, accent, soft], the same colours as the theme blocks in style.css
@@ -44,9 +42,11 @@ function setTroopTint(key) {
   const s = document.documentElement.style, c = TROOP_TINT[key];
   ['--troop', '--troop-accent', '--troop-soft'].forEach((v, i) => (c ? s.setProperty(v, c[i]) : s.removeProperty(v))); // no tint = main purple
 }
+// elements marked data-unit="key" are filled with the troop's own word (call again after a language or troop change)
 const paintUnits = () => document.querySelectorAll('[data-unit]').forEach((n) => { n.textContent = tu(n.dataset.unit); });
 const patrolName = (p) => (state.lang === 'ar' ? p.name_ar : p.name_en);
 
+// the browser tab title: the troop's name inside a troop's leader area, otherwise the page's own title
 function paintTitle() {
   const own = look.title && (state.lang === 'ar' ? look.title.ar || look.title.en : look.title.en || look.title.ar);
   document.title = own || t(document.documentElement.dataset.title || 'title');
@@ -245,7 +245,19 @@ document.addEventListener('click', (e) => document.querySelectorAll('header deta
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') document.querySelectorAll('header details.menu[open]').forEach((d) => d.removeAttribute('open')); });
 
 // the header menu (same on every page): the button names the page you are on, the list holds the other pages
-const SITE_PAGES = { home: ['/', 'home'], leader: ['/leader.html', 'leader_area'], depot: ['/depot.html', 'depot'] };
+const SITE_PAGES = { home: ['/', 'home'], leader: ['/leader.html', 'leader_area'], depot: ['/depot.html', 'depot'], account: ['/account.html', 'my_account'] };
+let signedIn = null; // null = not known yet
+let meDisplay = null;
+// the session check runs once per page load and is shared: pages call getMe() instead of asking the server again (null = not signed in)
+let mePromise = null;
+const getMe = () => (mePromise ||= fetch('/api/me', { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : null)).catch(() => null));
+getMe().then((me) => { signedIn = !!me; meDisplay = me?.display_name || me?.username || null; paintMenu(); paintWelcome(); });
+// signed in: the welcome caption on the dashboard greets the account by the first word of its display name (the first name)
+function paintWelcome() {
+  if (!meDisplay || !state.dict.subtitle_named) return;
+  document.querySelectorAll('header p[data-i18n="subtitle"]').forEach((p) => { p.textContent = t('subtitle_named').replace('{name}', meDisplay.trim().split(/\s+/)[0]); });
+}
+document.addEventListener('langchange', paintWelcome);
 function paintMenu() {
   document.querySelectorAll('header details.menu[data-page]').forEach((d) => {
     if (!state.dict.home) return; // language file not loaded yet
@@ -253,9 +265,18 @@ function paintMenu() {
     let sum = d.querySelector('summary'), list = d.querySelector('.menu-list');
     if (!sum) { sum = document.createElement('summary'); list = document.createElement('div'); list.className = 'menu-list'; d.append(sum, list); }
     sum.textContent = t(SITE_PAGES[here][1]);
-    list.replaceChildren(...Object.entries(SITE_PAGES).filter(([k]) => k !== here).map(([, [href, key]]) => {
+    const links = Object.entries(SITE_PAGES).filter(([k]) => k !== here && k !== 'account').map(([, [href, key]]) => { // (My account is not a regular entry: it takes the place of Sign in once signed in)
       const a = document.createElement('a'); a.href = href; a.textContent = t(key); return a;
-    }));
+    });
+    // visitors who aren't signed in get a Sign in option (the sign-in form lives on the leader page, so not shown there)
+    if (signedIn === false && here !== 'leader') {
+      const a = document.createElement('a'); a.href = '/leader.html?next=' + encodeURIComponent(location.pathname + location.search); a.className = 'signin'; a.textContent = t('sign_in'); links.push(a);
+    }
+    // signed in: My account takes the place of Sign in (the last row, set apart by a line)
+    if (signedIn === true && here !== 'account') {
+      const a = document.createElement('a'); a.href = SITE_PAGES.account[0]; a.className = 'signin'; a.textContent = t('my_account'); links.push(a);
+    }
+    list.replaceChildren(...links);
   });
 }
 document.addEventListener('langchange', paintMenu);

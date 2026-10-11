@@ -251,3 +251,31 @@ The English labels were left as they were (for example "Dashboard" and "Leader a
 - New page `/depot.html`: the depot inventory (item name in both languages, quantity, notes; searchable). **Everyone can view and search it, no sign-in needed.** Admins and the super admin can edit and delete items; **only the super admin can add items** (enforced on the server: `GET /api/depot` public, `PUT/DELETE` admin, `POST` super admin). Everyone else sees a small notice that you need to be logged in as an admin to edit (no link to the leader area). The same Leader area / Depot drop-down menu is in the header of both the dashboard and the depot page. One shared inventory (not per troop), new table `depot_items`, changes are written to the activity log.
 - The header menu is now the same on the dashboard, the leader area and the depot: the button shows the page you are on, and the list holds the other two pages (built by `paintMenu()` in `common.js`, follows the language).
 - Phone header: the language (and logout) buttons are compact and the menu button fills the rest of the row; the drop-down list is wider with larger tap targets.
+- Header polish: the menu arrow is now a small centred chevron (points down, flips up when open) instead of a text glyph; on phones the title stays on one line with the small caption (and signed-in name) under it.
+- The dashboard header caption is now a welcome text: «مرحبا بك في منصة الفوج الثاني» (English: Welcome to the Second Troop platform).
+- The header menu has a **Sign in / تسجيل الدخول** option (last item, set apart by a line) for visitors who aren't signed in; it opens the sign-in form on the leader page. It is hidden once you are signed in and on the leader page itself.
+- Welcome caption: English now reads «Welcome to the Scout Troop 2 platform». When signed in, the dashboard greets the account by the first word (first name) of the display name on its scout profile (`/api/me` and login now return `display_name`): «مرحبا بك {name} في منصة الفوج الثاني».
+
+## Sign-in redirect and stay signed in
+- Signing in no longer lands you in the leader area: you go back to the page you came from (the header's Sign in link remembers it) or to the dashboard. The leader area is still one click away in the header menu.
+- You now stay signed in until you press Sign out: the session cookie lasts ~400 days (the browser maximum) and is renewed every time you open a page, so it never expires while you keep using the site. Keep `JWT_SECRET` the same on Render, otherwise everyone is signed out when it changes.
+
+## Meetings attendance register (سجل حضور اجتماعات)
+- New tab **سجل حضور اجتماعات / Meetings attendance** in the leader area. Every troop keeps its own register (the super admin sees the troop picked in the troop switcher).
+- Add a meeting (date + optional title), open it and tick the scouts who were present; each tick is saved immediately. Scouts are grouped by patrol, the leaders' patrol first. **Mark everyone present** / **Clear all** buttons, and the meeting's date/title can be edited.
+- The list shows how many were present at each meeting, and **Attendance per scout** shows meetings attended out of the meetings held since the scout joined, with a percentage (best attendance first).
+- Leader-only (nothing on the public dashboard). Admins, mods and the super admin can take attendance; deleting a meeting is closed to mods. Adding, editing and deleting meetings is written to the activity log.
+- New tables `meetings` and `meeting_attendance` (created automatically on startup; no existing data touched). New routes: `GET/POST /api/meetings`, `GET/PUT/DELETE /api/meetings/:id`, `PUT /api/meetings/:id/attendance[/:scoutId]`, `GET /api/attendance/summary`.
+
+## My account moved to the header menu; Sign out moved into it
+- In the header drop-down menu, the last row (where **Sign in** shows for visitors) becomes **My account / حسابي** once you are signed in. It opens the new page `/account.html` with the change-username/password form and the **Log out** button.
+- The **My account** tab and the **Log out** button are gone from the leader area. Visitors who open `/account.html` are sent to sign in and come back to it afterwards; logging out returns to the dashboard.
+
+## Fix: blank site after the My account change
+- A comment added to `common.js` in the previous update swallowed the rest of its line and broke the script, so every page loaded blank. Fixed; every script and page was syntax-checked again and every element id and translation key the pages use was verified.
+
+## Speed and cleanup pass
+- **Fewer database round trips on every signed-in request.** The account and its permissions are now fetched together (was two queries one after the other); the troop list (themes, names) is kept in memory for a minute and refreshed immediately when a troop is added, edited or deleted, so most requests no longer query `troops` at all (including every visit to the dashboard); login, `/api/me` and a scout's page run their independent lookups at the same time instead of one by one.
+- **XP totals are looked up per scout** (through the existing `xp_log` index) instead of summing the whole XP table on every list request, so the scout lists stay fast as the history grows. New index on `leaders.scout_id` for the leader-account checks in the lists.
+- **One session check per page** instead of two: `common.js` asks `/api/me` once and the leader, depot and account pages reuse the answer.
+- Cleanups: the login-attempt memory is pruned (it used to grow forever), the duplicate cache rules and the unneeded optional-`compression` fallback were removed, shared permission code is in one place, and a few misplaced comments were moved next to the code they describe.

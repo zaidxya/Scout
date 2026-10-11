@@ -88,10 +88,8 @@
     document.addEventListener('langchange', draw);
     (async () => {
       await initLang();
-      try {
-        const me = await api('/api/me'); // not signed in -> 401 -> read-only
-        isSuper = me.role === 'super_admin'; canEdit = isSuper || me.role === 'admin';
-      } catch { /* a visitor: read-only */ }
+      const me = await getMe(); // null for a visitor: read-only
+      if (me) { isSuper = me.role === 'super_admin'; canEdit = isSuper || me.role === 'admin'; }
       $('addForm').classList.toggle('hidden', !isSuper);
       $('editNote').classList.toggle('hidden', canEdit);
       try { await load(); } catch (e) { fail(e); }

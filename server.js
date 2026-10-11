@@ -20,16 +20,15 @@ app.get('/healthz', (req, res) => res.type('text').send('ok')); // for uptime pi
 
 // one log line per page/API request (shows up in Render's Logs tab); skips static assets and photos
 app.use(morgan('combined', { skip: (req) => /\.(js|css|png|jpe?g|ico|svg|json|woff2?)$/i.test(req.path) || /\/photo$/.test(req.path) }));
-// gzip text responses (HTML, JS, CSS, JSON) - 3-5x smaller downloads. Optional: skipped if the package isn't installed.
-try { app.use(require('compression')()); } catch { console.log('compression not installed; run "npm install" to enable gzip'); }
+// gzip text responses (HTML, JS, CSS, JSON) - 3-5x smaller downloads
+app.use(require('compression')());
 app.use(express.json({ limit: '600kb' }));
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public'), {
   setHeaders: (res, file) => {
-    // pages are always re-checked (cheap 304 when unchanged); scripts, styles and language files are reused for 5 minutes;
+    // pages, scripts, styles and language files are always re-checked (a cheap 304 when unchanged), so an update shows up at once;
     // the logo and icons almost never change, so they're kept for a week
-    if (/\.html$/i.test(file)) res.setHeader('Cache-Control', 'no-cache');
-    else if (/\.(js|css|json)$/i.test(file)) res.setHeader('Cache-Control', 'no-cache'); // always revalidate (ETag), so an update shows up at once
+    if (/\.(html|js|css|json)$/i.test(file)) res.setHeader('Cache-Control', 'no-cache');
     else if (/\.(png|jpe?g|ico|svg|woff2?)$/i.test(file)) res.setHeader('Cache-Control', 'public, max-age=604800');
   },
 }));
@@ -55,8 +54,19 @@ const date = (v) => {
 // ---- troop themes: the visual identity a troop's leaders see after signing in (the main site stays purple) ----
 const THEME_KEYS = ['default', 'rovers', 'forest', 'forest_girls', 'ocean', 'yellow', 'yellow_hannabies', 'red', 'red_advanced', 'white'];
 // what a troop's leaders see after signing in: the theme plus the optional text next to the logo
+// the troop list is tiny and changes rarely, so it is kept in memory for a minute (and dropped whenever a troop is added, edited or deleted)
+let troopCache = null, troopCacheAt = 0;
+const troopList = async () => {
+  if (!troopCache || Date.now() - troopCacheAt > 60000) {
+    troopCache = (await pool.query("SELECT id, name_en, name_ar, COALESCE(theme, 'default') AS theme, brand_en, brand_ar FROM troops ORDER BY id")).rows;
+    troopCacheAt = Date.now();
+  }
+  return troopCache;
+};
+const dropTroopCache = () => { troopCache = null; };
+const firstTroopId = async () => (await troopList())[0]?.id ?? null; // no troop given: the first one
 const troopLook = async (troopId) => {
-  const r = (await pool.query('SELECT theme, brand_en, brand_ar FROM troops WHERE id = $1', [troopId])).rows[0] || {};
+  const r = (await troopList()).find((x) => x.id === troopId) || {};
   return { theme: r.theme || 'default', brand_en: r.brand_en || null, brand_ar: r.brand_ar || null };
 };
 const brandOf = (b) => [text(b?.brand_en, 40), text(b?.brand_ar, 40)];
@@ -66,13 +76,17 @@ const themeOf = (b) => { const k = b?.theme ?? 'default'; if (!THEME_KEYS.includ
 // can switch on more. view_log: see the leader activity log. manage_accounts: add accounts, delete them, reset their passwords.
 // The super admin has all of them. Nobody can hand out a permission they don't hold themselves (see grantable()).
 const PERMS = ['view_log', 'manage_accounts'];
-async function permsOf(l) {
+const PERMS_OF_SCOUT_SQL = `SELECT DISTINCT unnest(lb.permissions) AS p FROM scout_labels sl JOIN labels lb ON lb.id = sl.label_id AND lb.kind = 'role' WHERE sl.scout_id = `;
+const PERMS_OF_ACCOUNT_SQL = PERMS_OF_SCOUT_SQL + '(SELECT scout_id FROM leaders WHERE id = $1)';
+// rows: the permissions given by the roles on the account's scout profile
+function permsFrom(l, rows) {
   if (l.role === 'super_admin') return new Set(PERMS);
   if (l.role === 'mod') return new Set(); // a mod (مسؤول) only works with members and their activity: no permissions, whatever roles its profile holds
-  if (!l.scout_id) return new Set();
-  const { rows } = await pool.query(
-    `SELECT DISTINCT unnest(lb.permissions) AS p FROM scout_labels sl JOIN labels lb ON lb.id = sl.label_id AND lb.kind = 'role' WHERE sl.scout_id = $1`, [l.scout_id]);
   return new Set(rows.map((r) => r.p).filter((p) => PERMS.includes(p)));
+}
+async function permsOf(l) {
+  if (l.role === 'super_admin' || l.role === 'mod' || !l.scout_id) return permsFrom(l, []);
+  return permsFrom(l, (await pool.query(PERMS_OF_SCOUT_SQL + '$1', [l.scout_id])).rows);
 }
 // a list of permission names from a request: only known ones, no duplicates, and only ones the actor holds
 const permList = (v) => {
@@ -87,17 +101,20 @@ const requirePerm = (p) => (req, res, next) => (req.perms.has(p) ? next() : bad(
 const requireLeader = wrap(async (req, res, next) => {
   let p;
   try { p = jwt.verify(req.cookies.token, SECRET); } catch { return bad(res, 'unauthorized', 401); }
-  const { rows } = await pool.query('SELECT id, username, role, troop_id, scout_id FROM leaders WHERE id = $1', [p.id]);
-  if (!rows[0]) return bad(res, 'unauthorized', 401); // e.g. leader was deleted
-  req.leader = rows[0];
-  req.perms = await permsOf(req.leader);
+  // the account and the permissions its scout profile's roles give are fetched together (one round trip instead of two)
+  const [who, granted] = await Promise.all([
+    pool.query('SELECT id, username, role, troop_id, scout_id FROM leaders WHERE id = $1', [p.id]),
+    pool.query(PERMS_OF_ACCOUNT_SQL, [p.id]),
+  ]);
+  if (!who.rows[0]) return bad(res, 'unauthorized', 401); // e.g. leader was deleted
+  req.leader = who.rows[0];
+  req.perms = permsFrom(req.leader, granted.rows);
   // the troop this request works on: a leader's own troop; the super admin is not bound to one and picks it
   // with the X-Troop header (an unknown or missing value falls back to the first troop)
   req.troop = req.leader.troop_id;
   if (req.leader.role === 'super_admin') {
-    const want = parseInt(req.get('x-troop'), 10);
-    req.troop = (await pool.query(
-      'SELECT COALESCE((SELECT id FROM troops WHERE id = $1), (SELECT MIN(id) FROM troops)) AS id', [Number.isInteger(want) ? want : null])).rows[0].id;
+    const all = await troopList();
+    req.troop = (all.find((x) => x.id === parseInt(req.get('x-troop'), 10)) || all[0]).id;
   }
   next();
 });
@@ -141,6 +158,7 @@ async function tx(fn) {
 }
 
 const attempts = new Map();
+setInterval(() => { const now = Date.now(); for (const [ip, a] of attempts) if (a.reset < now) attempts.delete(ip); }, 10 * 60 * 1000).unref(); // forget finished windows
 function loginLimiter(req, res, next) {
   const now = Date.now();
   let a = attempts.get(req.ip);
@@ -149,6 +167,14 @@ function loginLimiter(req, res, next) {
   attempts.set(req.ip, a);
   if (a.n > 10) return bad(res, 'too_many', 429);
   next();
+}
+
+// sessions last until the user signs out: a very long token plus a persistent cookie (browsers cap cookies at ~400 days),
+// renewed every time the session is checked so an account that keeps visiting never expires
+const SESSION_MS = 400 * 24 * 60 * 60 * 1000;
+function setSession(res, leaderId) {
+  const token = jwt.sign({ id: leaderId }, SECRET, { expiresIn: '3650d' });
+  res.cookie('token', token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: SESSION_MS });
 }
 
 app.post('/api/login', loginLimiter, wrap(async (req, res) => {
@@ -161,11 +187,9 @@ app.post('/api/login', loginLimiter, wrap(async (req, res) => {
     return bad(res, 'invalid_login', 401);
   }
   audit(leader, 'login');
-  const token = jwt.sign({ id: leader.id }, SECRET, { expiresIn: '12h' });
-  res.cookie('token', token, {
-    httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: 12 * 60 * 60 * 1000,
-  });
-  res.json({ username: leader.username, role: leader.role, troop_id: leader.troop_id, perms: [...(await permsOf(leader))], ...(await troopLook(leader.troop_id)) });
+  setSession(res, leader.id);
+  const [display_name, perms] = await Promise.all([displayNameOf(leader), permsOf(leader)]);
+  res.json({ username: leader.username, display_name, role: leader.role, troop_id: leader.troop_id, perms: [...perms], ...(await troopLook(leader.troop_id)) });
 }));
 
 app.post('/api/logout', wrap(async (req, res) => {
@@ -177,7 +201,11 @@ app.post('/api/logout', wrap(async (req, res) => {
   res.clearCookie('token');
   res.json({ ok: true });
 }));
-app.get('/api/me', requireLeader, wrap(async (req, res) => res.json({ username: req.leader.username, role: req.leader.role, troop_id: req.leader.troop_id, perms: [...req.perms], ...(await troopLook(req.leader.troop_id)) })));
+const displayNameOf = async (l) => (l.scout_id ? (await pool.query('SELECT name FROM scouts WHERE id = $1', [l.scout_id])).rows[0]?.name : null) || l.username; // the name on the account's scout profile
+app.get('/api/me', requireLeader, wrap(async (req, res) => {
+  setSession(res, req.leader.id);
+  res.json({ username: req.leader.username, display_name: await displayNameOf(req.leader), role: req.leader.role, troop_id: req.leader.troop_id, perms: [...req.perms], ...(await troopLook(req.leader.troop_id)) });
+}));
 
 // own account: change the username and/or the password (the current password is always required; a new password must be typed twice)
 app.put('/api/me/account', requireLeader, wrap(async (req, res) => {
@@ -210,7 +238,7 @@ const ROLES_JSON = `COALESCE((SELECT json_agg(json_build_object('id', l.id, 'nam
 
 // ---- troops (names are public so the dashboard can offer a troop picker) ----
 app.get('/api/troops', wrap(async (req, res) => {
-  res.json((await pool.query("SELECT id, name_en, name_ar, COALESCE(theme, 'default') AS theme, brand_en, brand_ar FROM troops ORDER BY id")).rows);
+  res.json(await troopList());
 }));
 
 const troopNames = (b) => {
@@ -231,6 +259,7 @@ app.post('/api/troops', requireLeader, requireSuper, wrap(async (req, res) => {
     await c.query('INSERT INTO patrols (troop_id, name_en, name_ar, is_leadership) VALUES ($1,$2,$3,true)', [rows[0].id, ...LEADERSHIP]); // every troop starts with its leaders' patrol
     return rows[0];
   });
+  dropTroopCache();
   audit(req.leader, 'troop_add', { name: en }, row.id);
   res.status(201).json(row);
 }));
@@ -239,6 +268,7 @@ app.put('/api/troops/:id', requireLeader, requireSuper, wrap(async (req, res) =>
   const [bEn, bAr] = brandOf(req.body);
   const r = await pool.query('UPDATE troops SET name_en = $1, name_ar = $2, theme = $3, brand_en = $4, brand_ar = $5 WHERE id = $6', [en, ar, themeOf(req.body), bEn, bAr, intId(req.params.id)]);
   if (!r.rowCount) return bad(res, 'not_found', 404);
+  dropTroopCache();
   audit(req.leader, 'troop_update', { name: en }, intId(req.params.id));
   res.json({ ok: true });
 }));
@@ -248,6 +278,7 @@ app.delete('/api/troops/:id', requireLeader, requireSuper, wrap(async (req, res)
   const used = await pool.query('SELECT (SELECT COUNT(*) FROM scouts WHERE troop_id = $1) + (SELECT COUNT(*) FROM leaders WHERE troop_id = $1) AS n', [id]);
   if (Number(used.rows[0].n) > 0) return bad(res, 'troop_not_empty', 409);
   const { rows } = await pool.query('DELETE FROM troops WHERE id = $1 RETURNING name_en', [id]);
+  dropTroopCache();
   if (rows[0]) audit(req.leader, 'troop_delete', { name: rows[0].name_en }, null);
   res.json({ ok: true });
 }));
@@ -259,10 +290,10 @@ async function isStaff(req) {
 // ---- public: dashboard data for one troop (display name, photo, roles, XP, activity) ----
 app.get('/api/scouts', wrap(async (req, res) => {
   let troop = parseInt(req.query.troop, 10);
-  if (!Number.isInteger(troop)) troop = (await pool.query('SELECT MIN(id) AS id FROM troops')).rows[0].id; // no troop given: the first one
+  if (!Number.isInteger(troop)) troop = await firstTroopId();
   const { rows } = await pool.query(
-    `SELECT s.id, s.name, s.patrol_id, s.photo_v, (s.photo IS NOT NULL) AS has_photo, COALESCE(x.total, 0)::int AS total_xp, EXISTS (SELECT 1 FROM leaders l WHERE l.scout_id = s.id AND l.role <> 'super_admin') AS in_council, ${ROLES_JSON}
-     FROM scouts s LEFT JOIN (SELECT scout_id, SUM(xp) AS total FROM xp_log GROUP BY scout_id) x ON x.scout_id = s.id
+    `SELECT s.id, s.name, s.patrol_id, s.photo_v, (s.photo IS NOT NULL) AS has_photo, COALESCE((SELECT SUM(xp) FROM xp_log x WHERE x.scout_id = s.id), 0)::int AS total_xp, EXISTS (SELECT 1 FROM leaders l WHERE l.scout_id = s.id AND l.role <> 'super_admin') AS in_council, ${ROLES_JSON}
+     FROM scouts s
      WHERE s.troop_id = $1 AND s.active
      ORDER BY (SELECT COALESCE(MAX(l.priority), 0) FROM scout_labels sl JOIN labels l ON l.id = sl.label_id AND l.kind = 'role' WHERE sl.scout_id = s.id) DESC, total_xp DESC, s.name`,
     [troop]);
@@ -271,12 +302,14 @@ app.get('/api/scouts', wrap(async (req, res) => {
 
 app.get('/api/scouts/:id', wrap(async (req, res) => {
   const id = intId(req.params.id);
-  const s = await pool.query(`SELECT s.id, s.name, s.troop_id, s.active, s.photo_v, (s.photo IS NOT NULL) AS has_photo, ${ROLES_JSON} FROM scouts s WHERE s.id = $1`, [id]);
+  const [s, log] = await Promise.all([
+    pool.query(`SELECT s.id, s.name, s.troop_id, s.active, s.photo_v, (s.photo IS NOT NULL) AS has_photo, ${ROLES_JSON} FROM scouts s WHERE s.id = $1`, [id]),
+    pool.query(
+      `SELECT id, activity, activity_ar, xp, note, created_at, COALESCE(activity_date, created_at::date)::text AS day
+       FROM xp_log WHERE scout_id = $1 ORDER BY COALESCE(activity_date, created_at::date) DESC, created_at DESC, id DESC`, [id]),
+  ]);
   if (!s.rows[0]) return bad(res, 'not_found', 404);
   if (!s.rows[0].active && !(await isStaff(req))) return bad(res, 'not_found', 404); // deactivated scouts are only visible to leaders
-  const log = await pool.query(
-    `SELECT id, activity, activity_ar, xp, note, created_at, COALESCE(activity_date, created_at::date)::text AS day
-     FROM xp_log WHERE scout_id = $1 ORDER BY COALESCE(activity_date, created_at::date) DESC, created_at DESC, id DESC`, [id]);
   res.json({ ...s.rows[0], total_xp: log.rows.reduce((sum, r) => sum + r.xp, 0), log: log.rows });
 }));
 
@@ -291,12 +324,12 @@ app.get('/api/scouts/:id/photo', wrap(async (req, res) => {
 app.get('/api/leader/scouts', requireLeader, wrap(async (req, res) => {
   const { rows } = await pool.query(
     `SELECT s.id, s.name, s.troop_id, s.patrol_id, s.active, s.photo_v, (s.photo IS NOT NULL) AS has_photo, s.full_name, s.phone,
-       COALESCE(x.total, 0)::int AS total_xp,
+       COALESCE((SELECT SUM(xp) FROM xp_log x WHERE x.scout_id = s.id), 0)::int AS total_xp,
        EXISTS (SELECT 1 FROM leaders l WHERE l.scout_id = s.id) AS is_leader,
        EXISTS (SELECT 1 FROM leaders l WHERE l.scout_id = s.id AND l.role = 'super_admin') AS is_super,
        EXISTS (SELECT 1 FROM leaders l WHERE l.scout_id = s.id AND l.role <> 'super_admin') AS in_council,
        COALESCE((SELECT json_agg(sl.label_id) FROM scout_labels sl WHERE sl.scout_id = s.id), '[]'::json) AS label_ids
-     FROM scouts s LEFT JOIN (SELECT scout_id, SUM(xp) AS total FROM xp_log GROUP BY scout_id) x ON x.scout_id = s.id
+     FROM scouts s
      WHERE s.troop_id = $1
      ORDER BY (SELECT COALESCE(MAX(l.priority), 0) FROM scout_labels sl JOIN labels l ON l.id = sl.label_id AND l.kind = 'role' WHERE sl.scout_id = s.id) DESC, total_xp DESC, s.name`,
     [req.troop]);
@@ -309,7 +342,7 @@ const LEADERSHIP_ROVERS = ['Honor council', 'مجلس الشرف']; // the same 
 const LEADERSHIP = ['Troop leadership', 'قيادة الفرقة']; // name of every troop's pre-made leaders' patrol
 app.get('/api/patrols', wrap(async (req, res) => {
   let troop = parseInt(req.query.troop, 10);
-  if (!Number.isInteger(troop)) troop = (await pool.query('SELECT MIN(id) AS id FROM troops')).rows[0].id; // no troop given: the first one
+  if (!Number.isInteger(troop)) troop = await firstTroopId();
   // the leaders' patrol always comes first; in a Rovers-themed troop it is called "مجلس الشرف" instead of "قيادة الفرقة"
   res.json((await pool.query(
     `SELECT p.id, CASE WHEN p.is_leadership AND t.theme = 'rovers' THEN $2 ELSE p.name_en END AS name_en,
@@ -698,6 +731,92 @@ app.put('/api/depot/:id', requireLeader, requireAdmin, wrap(async (req, res) => 
 app.delete('/api/depot/:id', requireLeader, requireAdmin, wrap(async (req, res) => {
   const { rows } = await pool.query('DELETE FROM depot_items WHERE id = $1 RETURNING name_en', [intId(req.params.id)]);
   if (rows[0]) audit(req.leader, 'depot_delete', { name: rows[0].name_en }, null);
+  res.json({ ok: true });
+}));
+
+// ---- meetings attendance register (سجل حضور اجتماعات): every troop keeps its own meetings and marks which scouts were present.
+// Every signed-in account of the troop can take attendance; deleting a meeting is closed to mods. Leader-only: nothing here is public. ----
+const NOT_SUPER = "NOT EXISTS (SELECT 1 FROM leaders l WHERE l.scout_id = s.id AND l.role = 'super_admin')"; // the super admin belongs to no troop, so is never on an attendance sheet
+const meetingBody = (b) => {
+  const day = date(b?.date);
+  if (!day || Date.parse(day) > Date.now() + 2 * 86400000) throw invalid(); // a date is required; none in the future
+  return [day, text(b?.title, 80)];
+};
+const meetingOf = async (req, id) => (await pool.query('SELECT id, meeting_date, title FROM meetings WHERE id = $1 AND troop_id = $2', [id, req.troop])).rows[0];
+
+app.get('/api/meetings', requireLeader, wrap(async (req, res) => {
+  res.json((await pool.query(
+    `SELECT m.id, m.meeting_date, m.title,
+       (SELECT COUNT(*) FROM meeting_attendance a JOIN scouts s ON s.id = a.scout_id WHERE a.meeting_id = m.id AND s.active AND ${NOT_SUPER})::int AS present
+     FROM meetings m WHERE m.troop_id = $1 ORDER BY m.meeting_date DESC, m.id DESC LIMIT 300`, [req.troop])).rows);
+}));
+
+// per scout: meetings attended out of the troop's meetings held since the scout joined
+app.get('/api/attendance/summary', requireLeader, wrap(async (req, res) => {
+  res.json((await pool.query(
+    `SELECT s.id, COUNT(m.id)::int AS total, COUNT(a.scout_id)::int AS attended
+     FROM scouts s
+     LEFT JOIN meetings m ON m.troop_id = s.troop_id AND (s.join_date IS NULL OR m.meeting_date >= s.join_date)
+     LEFT JOIN meeting_attendance a ON a.meeting_id = m.id AND a.scout_id = s.id
+     WHERE s.troop_id = $1 AND s.active AND ${NOT_SUPER} GROUP BY s.id`, [req.troop])).rows);
+}));
+
+app.post('/api/meetings', requireLeader, wrap(async (req, res) => {
+  const [day, title] = meetingBody(req.body);
+  const { rows } = await pool.query('INSERT INTO meetings (troop_id, meeting_date, title, created_by) VALUES ($1,$2,$3,$4) RETURNING id, meeting_date, title', [req.troop, day, title, req.leader.id]);
+  audit(req.leader, 'meeting_add', { name: `${day}${title ? ' ' + title : ''}` }, req.troop);
+  res.status(201).json({ ...rows[0], present: 0 });
+}));
+
+app.get('/api/meetings/:id', requireLeader, wrap(async (req, res) => {
+  const m = await meetingOf(req, intId(req.params.id));
+  if (!m) return bad(res, 'not_found', 404);
+  const ids = (await pool.query('SELECT scout_id FROM meeting_attendance WHERE meeting_id = $1', [m.id])).rows.map((r) => r.scout_id);
+  res.json({ ...m, present_ids: ids });
+}));
+
+app.put('/api/meetings/:id', requireLeader, wrap(async (req, res) => {
+  const [day, title] = meetingBody(req.body);
+  const m = await meetingOf(req, intId(req.params.id));
+  if (!m) return bad(res, 'not_found', 404);
+  await pool.query('UPDATE meetings SET meeting_date = $1, title = $2 WHERE id = $3', [day, title, m.id]);
+  audit(req.leader, 'meeting_update', { name: `${day}${title ? ' ' + title : ''}` }, req.troop);
+  res.json({ ok: true });
+}));
+
+app.delete('/api/meetings/:id', requireLeader, requireNotMod, wrap(async (req, res) => {
+  const { rows } = await pool.query('DELETE FROM meetings WHERE id = $1 AND troop_id = $2 RETURNING meeting_date, title', [intId(req.params.id), req.troop]);
+  if (rows[0]) audit(req.leader, 'meeting_delete', { name: `${rows[0].meeting_date}${rows[0].title ? ' ' + rows[0].title : ''}` }, req.troop);
+  res.json({ ok: true });
+}));
+
+// everyone at once: present = true marks all of the troop's active scouts present, false clears the sheet
+app.put('/api/meetings/:id/attendance', requireLeader, wrap(async (req, res) => {
+  const m = await meetingOf(req, intId(req.params.id));
+  if (!m) return bad(res, 'not_found', 404);
+  if (typeof req.body?.present !== 'boolean') throw invalid();
+  if (req.body.present) {
+    await pool.query(
+      `INSERT INTO meeting_attendance (meeting_id, scout_id) SELECT $1, s.id FROM scouts s WHERE s.troop_id = $2 AND s.active AND ${NOT_SUPER} ON CONFLICT DO NOTHING`, [m.id, req.troop]);
+  } else {
+    await pool.query('DELETE FROM meeting_attendance WHERE meeting_id = $1', [m.id]);
+  }
+  res.json({ ok: true });
+}));
+
+// one scout: present = true / false
+app.put('/api/meetings/:id/attendance/:scoutId', requireLeader, wrap(async (req, res) => {
+  const m = await meetingOf(req, intId(req.params.id));
+  if (!m) return bad(res, 'not_found', 404);
+  if (typeof req.body?.present !== 'boolean') throw invalid();
+  const sid = intId(req.params.scoutId);
+  if (req.body.present) {
+    const ok = await pool.query(`SELECT 1 FROM scouts s WHERE s.id = $1 AND s.troop_id = $2 AND s.active AND ${NOT_SUPER}`, [sid, req.troop]); // only an active scout of this troop
+    if (!ok.rowCount) return bad(res, 'not_found', 404);
+    await pool.query('INSERT INTO meeting_attendance (meeting_id, scout_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [m.id, sid]);
+  } else {
+    await pool.query('DELETE FROM meeting_attendance WHERE meeting_id = $1 AND scout_id = $2', [m.id, sid]);
+  }
   res.json({ ok: true });
 }));
 

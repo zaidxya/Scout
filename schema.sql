@@ -152,3 +152,23 @@ CREATE TABLE IF NOT EXISTS depot_items (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- meetings attendance register (سجل حضور اجتماعات): each troop keeps its own meetings; a row in meeting_attendance means that scout was present
+CREATE TABLE IF NOT EXISTS meetings (
+  id SERIAL PRIMARY KEY,
+  troop_id INT NOT NULL REFERENCES troops(id) ON DELETE CASCADE,
+  meeting_date DATE NOT NULL,
+  title TEXT,
+  created_by INT REFERENCES leaders(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS meetings_troop_date_idx ON meetings(troop_id, meeting_date DESC);
+CREATE TABLE IF NOT EXISTS meeting_attendance (
+  meeting_id INT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+  scout_id INT NOT NULL REFERENCES scouts(id) ON DELETE CASCADE,
+  PRIMARY KEY (meeting_id, scout_id)
+);
+CREATE INDEX IF NOT EXISTS meeting_attendance_scout_idx ON meeting_attendance(scout_id);
+
+-- the scout lists check for every scout whether it belongs to a leader account
+CREATE INDEX IF NOT EXISTS leaders_scout_idx ON leaders(scout_id);

@@ -18,7 +18,6 @@
     <div class="grow"><h1><a class="brand" href="/"><img src="/logo-mark.png" alt=""><span data-i18n="title"></span></a></h1><p data-i18n="leader_area"></p><p id="meName" dir="auto" style="font-weight:700;opacity:1;padding-inline-end:1rem;border-inline-end:1px solid rgba(var(--on-primary-rgb),.4)"></p></div>
     <nav>
       <details class="menu" data-page="leader"></details>
-      <button id="logoutBtn" type="button" class="hidden" data-i18n="logout"></button>
       <button id="langBtn" type="button" class="lang" data-i18n="lang_toggle">العربية</button>
     </nav>
   </header>
@@ -37,11 +36,11 @@
         <button id="btn-scouts" type="button" role="tab" data-i18n="tab_scouts"></button>
         <button id="btn-activities" type="button" role="tab" data-i18n="tab_activities"></button>
         <button id="btn-patrols" type="button" role="tab" data-unit="tab_patrols"></button>
+        <button id="btn-attendance" type="button" role="tab" data-i18n="tab_attendance"></button>
         <button id="btn-labels" type="button" role="tab" data-i18n="tab_labels"></button>
         <button id="btn-troops" type="button" role="tab" data-i18n="tab_troops"></button>
         <button id="btn-leaders" type="button" role="tab" data-i18n="tab_leaders"></button>
         <button id="btn-log" type="button" role="tab" data-i18n="tab_log"></button>
-        <button id="btn-password" type="button" role="tab" data-i18n="tab_password"></button>
       </div>
       <p id="toast" class="error" role="status"></p>
 
@@ -94,6 +93,33 @@
             <button class="btn" type="submit" data-i18n="add"></button>
           </form>
         </div>
+      </div>
+
+      <div id="tab-attendance" class="hidden">
+        <div id="attHome">
+          <div class="panel">
+            <h2 data-i18n="tab_attendance"></h2>
+            <p class="hint" data-i18n="att_hint"></p>
+            <form id="meetingForm">
+              <h3 data-i18n="att_new_meeting"></h3>
+              <div class="grid2">
+                <label><span data-i18n="att_date"></span><input name="date" type="date" required></label>
+                <label><span data-i18n="att_title"></span><input name="title" type="text" maxlength="80"></label>
+              </div>
+              <button class="btn" type="submit" data-i18n="add"></button>
+            </form>
+          </div>
+          <div class="panel">
+            <h3 data-i18n="att_meetings"></h3>
+            <ul id="meetingList" class="simple-list"></ul>
+          </div>
+          <div class="panel">
+            <h3 data-i18n="att_summary_title"></h3>
+            <p class="hint" data-i18n="att_summary_hint"></p>
+            <ul id="attSummary" class="simple-list"></ul>
+          </div>
+        </div>
+        <div id="attSheet" class="panel hidden"></div>
       </div>
 
       <div id="tab-log" class="hidden">
@@ -152,22 +178,6 @@
         </div>
       </div>
 
-      <div id="tab-password" class="hidden">
-        <form id="pwForm" class="panel">
-          <h2 data-i18n="my_account"></h2>
-          <label><span data-i18n="username"></span><input id="myUsername" name="username" type="text" autocomplete="username" pattern="[A-Za-z0-9_.\-]{3,40}" required></label>
-          <h3 data-i18n="change_password"></h3>
-          <p class="hint" data-i18n="pw_optional_hint"></p>
-          <div class="grid2">
-            <label><span data-i18n="new_password"></span><input name="next" type="password" autocomplete="new-password" minlength="8"></label>
-            <label><span data-i18n="confirm_password"></span><input name="confirm" type="password" autocomplete="new-password" minlength="8"></label>
-          </div>
-          <label><span data-i18n="current_password"></span><input name="current" type="password" autocomplete="current-password" required></label>
-          <p class="hint" data-i18n="current_pw_hint"></p>
-          <button class="btn" type="submit" data-i18n="save"></button>
-        </form>
-      </div>
-
       <div id="tab-leaders" class="hidden">
         <div id="leaderPanel" class="panel">
           <h2 data-i18n="leaders_title"></h2>
@@ -198,10 +208,10 @@
     // permissions: the super admin has them all; everyone else gets them from the roles on their scout profile (the server sends the list)
     const PERMS = ['view_log', 'manage_accounts'];
     const can = (p) => isSuper() || myPerms.includes(p);
-    const TABS = ['scouts', 'activities', 'patrols', 'labels', 'troops', 'leaders', 'log', 'password'];
+    const TABS = ['scouts', 'activities', 'patrols', 'attendance', 'labels', 'troops', 'leaders', 'log'];
     // tabs that need more than the basics: the troops are for the super admin only, the other two need a permission (given through a role)
     const isMod = () => myRole === 'mod'; // a mod (مسؤول) has the members, their activity and the patrols (and its own password)
-    const tabAllowed = (n) => isMod() ? (n === 'scouts' || n === 'patrols' || n === 'password') : (n === 'troops' ? isSuper() : n === 'leaders' ? can('manage_accounts') : n === 'log' ? can('view_log') : true);
+    const tabAllowed = (n) => isMod() ? (n === 'scouts' || n === 'patrols' || n === 'attendance') : (n === 'troops' ? isSuper() : n === 'leaders' ? can('manage_accounts') : n === 'log' ? can('view_log') : true);
 
     const msg = (text, ok) => { $('toast').textContent = text || ''; $('toast').className = 'error' + (ok ? ' ok' : ''); };
     const fail = (e) => { if (e.status === 401 && e.code === 'unauthorized') show(false); msg(errText(e)); };
@@ -209,7 +219,6 @@
     function show(authed) {
       $('loginForm').classList.toggle('hidden', authed);
       $('app').classList.toggle('hidden', !authed);
-      $('logoutBtn').classList.toggle('hidden', !authed);
       $('meName').textContent = authed && me ? me : '';
       $('meName').style.display = authed && me ? '' : 'none';
     }
@@ -228,6 +237,7 @@
       });
       if (n === 'activities') loadActs();
       if (n === 'patrols') loadPatrols();
+      if (n === 'attendance') openAttendance();
       if (n === 'labels') loadLabels();
       if (n === 'troops') loadTroops();
       if (n === 'leaders' && can('manage_accounts')) loadLeaders();
@@ -274,10 +284,11 @@
     }
     // everything below the switcher belongs to one troop, so switching reloads it all
     async function loadTroopData() {
-      current = null; data = det = null; acts = []; labels = []; patrols = []; scouts = [];
+      current = null; data = det = null; acts = []; labels = []; patrols = []; scouts = []; meetings = []; meeting = null;
       [acts, labels, patrols, scouts] = await Promise.all([api('/api/activities'), api('/api/labels'), api('/api/patrols?troop=' + activeTroop()), api('/api/leader/scouts')]);
       drawList(); drawDetail(); drawActs(); drawLabels(); drawPatrols();
       if (!$('tab-leaders').classList.contains('hidden')) loadLeaders();
+      if (!$('tab-attendance').classList.contains('hidden')) openAttendance();
       if (!$('tab-log').classList.contains('hidden')) loadLog();
     }
     $('troopSwitch').addEventListener('change', async () => {
@@ -525,6 +536,90 @@
       catch (e) { fail(e); }
     });
 
+    // ---------- meetings attendance register (سجل حضور اجتماعات) ----------
+    let meetings = [], attSummary = [], meeting = null; // meeting: the sheet being filled in ({ id, meeting_date, title, present_ids }) or null for the list
+    const today = () => new Date().toISOString().slice(0, 10);
+    const meetingLabel = (m) => fmtDay(m.meeting_date) + (m.title ? ' · ' + m.title : '');
+    const countText = (n, of) => t('att_count').replace('{n}', fmt(n)).replace('{m}', fmt(of));
+    // the scouts that can be on a sheet: the troop's active scouts, except the super admin who belongs to no troop
+    const sheetScouts = () => scouts.filter((s) => s.active && !s.is_super);
+    async function openAttendance(id) {
+      try {
+        meeting = null;
+        const f = $('meetingForm').elements.date; if (!f.value) f.value = today(); f.max = today();
+        [meetings, attSummary] = await Promise.all([api('/api/meetings'), api('/api/attendance/summary')]);
+        if (id) meeting = await api('/api/meetings/' + id);
+      } catch (e) { fail(e); }
+      drawAttendance();
+    }
+    function drawAttendance() {
+      $('attHome').classList.toggle('hidden', !!meeting);
+      $('attSheet').classList.toggle('hidden', !meeting);
+      meeting ? drawSheet() : drawMeetings();
+    }
+    function drawMeetings() {
+      const total = sheetScouts().length;
+      $('meetingList').replaceChildren(...(meetings.length ? meetings.map((m) => el('li', {},
+        el('button', { class: 'btn quiet-link grow', type: 'button', style: 'text-align:start;background:none;border:0;color:inherit;font:inherit;cursor:pointer;padding:0', onclick: () => openAttendance(m.id) }, el('b', {}, meetingLabel(m))),
+        el('small', {}, countText(m.present, total)))) : [el('li', { class: 'empty' }, t('att_none_yet'))]));
+      const rows = sheetScouts().map((s) => ({ s, a: attSummary.find((x) => x.id === s.id) || { attended: 0, total: 0 } }))
+        .sort((x, y) => (y.a.total ? y.a.attended / y.a.total : 0) - (x.a.total ? x.a.attended / x.a.total : 0) || x.s.name.localeCompare(y.s.name, state.lang));
+      $('attSummary').replaceChildren(...(meetings.length ? rows.map(({ s, a }) => el('li', {},
+        el('span', { class: 'grow', dir: 'auto' }, s.name),
+        el('small', {}, countText(a.attended, a.total)),
+        el('b', {}, a.total ? fmt(Math.round(100 * a.attended / a.total)) + '%' : '—'))) : [el('li', { class: 'empty' }, t('att_none_yet'))]));
+    }
+    function drawSheet() {
+      const m = meeting, box = $('attSheet');
+      const present = new Set(m.present_ids);
+      const list = sheetScouts();
+      const counter = el('b', {}, countText(list.filter((s) => present.has(s.id)).length, list.length));
+      const refreshCount = () => { counter.textContent = countText(list.filter((s) => present.has(s.id)).length, list.length); };
+      const dateIn = el('input', { type: 'date', value: m.meeting_date, required: '', max: today(), 'aria-label': t('att_date') });
+      const titleIn = el('input', { type: 'text', maxlength: '80', value: m.title || '', 'aria-label': t('att_title'), placeholder: t('att_title') });
+      const checks = new Map();
+      const setAll = async (on) => {
+        try { await api(`/api/meetings/${m.id}/attendance`, 'PUT', { present: on }); } catch (e) { return fail(e); }
+        present.clear(); if (on) list.forEach((s) => present.add(s.id));
+        m.present_ids = [...present]; checks.forEach((c, id) => { c.checked = present.has(id); }); refreshCount(); msg('');
+      };
+      const row = (s) => {
+        const c = el('input', { type: 'checkbox', id: 'att' + s.id }); c.checked = present.has(s.id); checks.set(s.id, c);
+        c.addEventListener('change', async () => {
+          const on = c.checked;
+          try { await api(`/api/meetings/${m.id}/attendance/${s.id}`, 'PUT', { present: on }); } catch (e) { c.checked = !on; return fail(e); }
+          on ? present.add(s.id) : present.delete(s.id); m.present_ids = [...present]; refreshCount(); msg('');
+        });
+        return el('li', {}, el('label', { class: 'grow', for: 'att' + s.id, style: 'display:flex;align-items:center;gap:.6rem;cursor:pointer' }, c, el('span', { dir: 'auto' }, s.name)));
+      };
+      // grouped like the scout lists: each patrol under its own heading (the leaders' patrol first), scouts without one last
+      const groups = patrols.map((p) => [patrolName(p), list.filter((s) => s.patrol_id === p.id || (p.is_leadership && s.in_council))])
+        .concat([[tu('no_patrol'), list.filter((s) => !s.patrol_id && !s.in_council)]]).filter(([, g]) => g.length);
+      box.replaceChildren(
+        el('div', { class: 'row' }, el('button', { class: 'btn small', type: 'button', onclick: () => openAttendance() }, t('att_back')), el('span', { class: 'grow' }), counter),
+        el('h2', {}, meetingLabel(m)),
+        el('div', { class: 'grid2' }, el('label', {}, el('span', {}, t('att_date')), dateIn), el('label', {}, el('span', {}, t('att_title')), titleIn)),
+        el('div', { class: 'row' },
+          el('button', { class: 'btn small', type: 'button', onclick: async () => {
+            try { await api('/api/meetings/' + m.id, 'PUT', { date: dateIn.value, title: titleIn.value }); m.meeting_date = dateIn.value; m.title = titleIn.value.trim() || null; msg(t('saved'), true); drawSheet(); }
+            catch (e) { fail(e); }
+          } }, t('save')),
+          myRole !== 'mod' ? el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
+            if (!(await confirmBox(t('confirm_delete_meeting')))) return;
+            try { await api('/api/meetings/' + m.id, 'DELETE'); msg(''); await openAttendance(); } catch (e) { fail(e); }
+          } }, t('delete')) : ''),
+        el('div', { class: 'row', style: 'margin:.75rem 0' },
+          el('button', { class: 'btn small', type: 'button', onclick: () => setAll(true) }, t('att_all')),
+          el('button', { class: 'btn quiet small', type: 'button', onclick: () => setAll(false) }, t('att_clear'))),
+        ...(groups.length ? groups.flatMap(([name, g]) => [el('h3', {}, name), el('ul', { class: 'simple-list' }, g.map(row))]) : [el('p', { class: 'empty' }, t('att_no_scouts'))]));
+    }
+    $('meetingForm').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const f = new FormData(ev.target);
+      try { const m = await api('/api/meetings', 'POST', { date: f.get('date'), title: f.get('title') }); ev.target.elements.title.value = ''; msg(''); await openAttendance(m.id); }
+      catch (e) { fail(e); }
+    });
+
     // ---------- activity log ----------
     let logRows = [];
     async function loadLog() { try { logRows = await api('/api/audit'); drawLog(); } catch (e) { fail(e); } }
@@ -662,18 +757,6 @@
       try { await api('/api/leaders', 'POST', { username: f.get('username'), password: f.get('password'), display_name: f.get('display_name'), role: f.get('role') }); ev.target.reset(); msg(t('saved'), true); await loadLeaders(); await loadScouts(); }
       catch (e) { fail(e); }
     });
-    $('pwForm').addEventListener('submit', async (ev) => {
-      ev.preventDefault();
-      const f = new FormData(ev.target);
-      if ((f.get('next') || '') !== (f.get('confirm') || '')) return msg(t('err_password_mismatch'));
-      try {
-        const r = await api('/api/me/account', 'PUT', { username: f.get('username'), current: f.get('current'), next: f.get('next'), confirm: f.get('confirm') });
-        me = r.username; show(true); fillMyUsername();
-        ['current', 'next', 'confirm'].forEach((n) => { ev.target.elements[n].value = ''; });
-        msg(t('saved'), true);
-      } catch (e) { fail(e); }
-    });
-    const fillMyUsername = () => { const i = $('myUsername'); if (i) i.value = me; };
 
     // ---------- login / boot ----------
     async function enter(username, role, troop, look) {
@@ -681,7 +764,7 @@
       let saved = null; try { saved = parseInt(localStorage.getItem('leaderTroop'), 10) || null; } catch { /* ignore */ }
       state.troop = myTroop; // the super admin has none yet: the first request below uses the first troop until one is chosen
       if (!isSuper()) applyTheme(look?.theme, { en: look?.brand_en, ar: look?.brand_ar });
-      show(true); applyRole(); showTab('scouts'); drawLeaders(); fillMyUsername();
+      show(true); applyRole(); showTab('scouts'); drawLeaders();
       try {
         troops = await api('/api/troops');
         chooseTroop(isSuper() ? saved : myTroop); // the super admin starts in the troop they used last; everyone else in their own
@@ -696,18 +779,20 @@
       const f = new FormData(ev.target);
       try {
         const r = await api('/api/login', 'POST', { username: f.get('username'), password: f.get('password') });
-        $('loginErr').textContent = ''; ev.target.reset(); await enter(r.username, r.role, r.troop_id, r);
+        $('loginErr').textContent = ''; ev.target.reset();
+        // signing in sends you back to the page you came from (or the dashboard), not into the leader area
+        const back = new URLSearchParams(location.search).get('next');
+        location.replace(back && /^\/(?!\/)/.test(back) && !back.startsWith('/leader.html') ? back : '/');
       } catch (e) { $('loginErr').textContent = errText(e); }
     });
-    $('logoutBtn').addEventListener('click', async () => { await api('/api/logout', 'POST'); state.troop = null; setUnitTheme('default'); applyTheme('default'); data = det = null; current = null; show(false); });
 
     document.addEventListener('langchange', () => {
       if ($('app').classList.contains('hidden')) return;
-      paintUnits(); fillTroopSelects(); drawList(); drawDetail(); drawActs(); drawPatrols(); drawLabels(); drawTroops(); drawLeaders(); drawLog();
+      paintUnits(); fillTroopSelects(); drawList(); drawDetail(); drawActs(); drawPatrols(); drawLabels(); drawTroops(); drawLeaders(); drawLog(); drawAttendance();
     });
 
     (async () => {
-      const [, r] = await Promise.all([initLang(), api('/api/me').catch(() => null)]); // language + session check at the same time
+      const [, r] = await Promise.all([initLang(), getMe()]); // language + session check at the same time (the session check is shared with common.js)
       if (r) await enter(r.username, r.role, r.troop_id, r); else show(false);
     })();
   </script>

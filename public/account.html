@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="ar" dir="rtl" data-title="title_leader">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>كشاف الفوج الثاني</title>
+  <link rel="icon" type="image/png" sizes="192x192" href="/favicon-v2.png">
+  <link rel="apple-touch-icon" href="/favicon-v2.png">
+  <meta name="theme-color" content="#671e93">
+  <script>document.documentElement.classList.add('js')</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <div class="grow"><h1><a class="brand" href="/"><img src="/logo-mark.png" alt=""><span data-i18n="title"></span></a></h1><p data-i18n="my_account"></p></div>
+    <nav>
+      <details class="menu" data-page="account"></details>
+      <button id="langBtn" type="button" class="lang" data-i18n="lang_toggle">العربية</button>
+    </nav>
+  </header>
+  <main>
+    <p id="toast" class="error" role="status"></p>
+    <form id="pwForm" class="panel">
+      <h2 data-i18n="my_account"></h2>
+      <label><span data-i18n="username"></span><input id="myUsername" name="username" type="text" autocomplete="username" pattern="[A-Za-z0-9_.\-]{3,40}" required></label>
+      <h3 data-i18n="change_password"></h3>
+      <p class="hint" data-i18n="pw_optional_hint"></p>
+      <div class="grid2">
+        <label><span data-i18n="new_password"></span><input name="next" type="password" autocomplete="new-password" minlength="8"></label>
+        <label><span data-i18n="confirm_password"></span><input name="confirm" type="password" autocomplete="new-password" minlength="8"></label>
+      </div>
+      <label><span data-i18n="current_password"></span><input name="current" type="password" autocomplete="current-password" required></label>
+      <p class="hint" data-i18n="current_pw_hint"></p>
+      <button class="btn" type="submit" data-i18n="save"></button>
+    </form>
+    <div class="panel">
+      <button id="logoutBtn" type="button" class="btn quiet" data-i18n="logout"></button>
+    </div>
+  </main>
+  <script src="/common.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const msg = (text, ok) => { $('toast').textContent = text || ''; $('toast').className = 'error' + (ok ? ' ok' : ''); };
+    const fail = (e) => {
+      if (e.status === 401 && e.code === 'unauthorized') return location.replace('/leader.html?next=/account.html'); // signed out meanwhile: sign in, then come back here
+      msg(errText(e));
+    };
+    $('pwForm').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const f = new FormData(ev.target);
+      if ((f.get('next') || '') !== (f.get('confirm') || '')) return msg(t('err_password_mismatch'));
+      try {
+        const r = await api('/api/me/account', 'PUT', { username: f.get('username'), current: f.get('current'), next: f.get('next'), confirm: f.get('confirm') });
+        $('myUsername').value = r.username;
+        ['current', 'next', 'confirm'].forEach((n) => { ev.target.elements[n].value = ''; });
+        msg(t('saved'), true);
+      } catch (e) { fail(e); }
+    });
+    $('logoutBtn').addEventListener('click', async () => {
+      try { await api('/api/logout', 'POST'); } catch { /* already signed out */ }
+      location.replace('/');
+    });
+    (async () => {
+      const [, me] = await Promise.all([initLang(), getMe()]);
+      if (!me) return location.replace('/leader.html?next=/account.html'); // visitors have no account page: send them to sign in
+      $('myUsername').value = me.username;
+    })();
+  </script>
+</body>
+</html>

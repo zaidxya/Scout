@@ -434,7 +434,9 @@ header .brand.notext span { display: none; }
 header details.menu { position: relative; }
 header details.menu > summary { list-style: none; color: var(--on-primary); border: 1px solid var(--on-primary); border-radius: 6px; padding: .3rem .85rem; font-size: .9rem; cursor: pointer; user-select: none; }
 header details.menu > summary::-webkit-details-marker { display: none; }
-header details.menu > summary::after { content: ' \25BE'; }
+header details.menu > summary { display: inline-flex; align-items: center; justify-content: center; gap: .55rem; }
+header details.menu > summary::after { content: ''; flex: none; width: .42em; height: .42em; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: translateY(-.15em) rotate(45deg); transition: transform .15s; }
+header details.menu[open] > summary::after { transform: translateY(.1em) rotate(-135deg); }
 header details.menu > summary:hover, header details.menu[open] > summary { background: rgba(var(--on-primary-rgb), .18); }
 header .menu-list { position: absolute; inset-inline-end: 0; top: calc(100% + .35rem); min-width: 10rem; z-index: 20; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: .3rem; box-shadow: 0 8px 24px rgba(var(--ink-rgb), .18); display: flex; flex-direction: column; }
 header .menu-list a { color: var(--ink); border: 0; border-radius: 8px; padding: .5rem .8rem; }
@@ -454,3 +456,14 @@ header .menu-list a { padding: .65rem 1rem; font-size: 1rem; }
   header .menu-list { min-width: min(18rem, calc(100vw - 2rem)); inset-inline-start: 0; inset-inline-end: auto; }
   header .menu-list a { padding: .85rem 1.1rem; font-size: 1.05rem; }
 }
+
+/* phone header: title on one line, the small caption (and the signed-in name) tucked under it instead of squeezed beside it */
+@media (max-width: 760px) {
+  header .grow { flex-wrap: wrap; row-gap: .1rem; column-gap: .6rem; align-items: center; }
+  header .grow h1 { flex: 1 1 100%; }
+  header .grow p { flex: 0 1 auto; font-size: .78rem; opacity: .7; letter-spacing: .01em; white-space: nowrap; }
+  header .grow #meName { opacity: .95 !important; font-size: .78rem; margin-inline-start: 0 !important; border-inline-end: 0 !important; padding-inline-end: 0 !important; }
+  header .brand { font-size: 1.25rem; white-space: nowrap; }
+}
+
+header .menu-list a.signin { margin-top: .25rem; border-top: 1px solid var(--line); border-radius: 0 0 8px 8px; color: var(--primary); font-weight: 700; }
