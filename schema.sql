@@ -169,6 +169,20 @@ CREATE TABLE IF NOT EXISTS meeting_attendance (
   PRIMARY KEY (meeting_id, scout_id)
 );
 CREATE INDEX IF NOT EXISTS meeting_attendance_scout_idx ON meeting_attendance(scout_id);
+-- the register holds meetings and events (kind); marking a scout present grants XP, stored as an xp_log row linked to the meeting
+-- (removed again when the scout is unmarked or the meeting is deleted; one per scout and meeting)
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'meeting' CHECK (kind IN ('meeting', 'event'));
+-- xp: what each scout marked present gets (chosen per meeting/event, 0 = none; existing ones keep the 10 they gave)
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS xp INT NOT NULL DEFAULT 10 CHECK (xp BETWEEN 0 AND 1000);
+-- absent_xp: what a scout marked absent loses (chosen per meeting/event, 0 = none); meeting_absences: the scouts marked absent (no row = no mark)
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS absent_xp INT NOT NULL DEFAULT 0 CHECK (absent_xp BETWEEN 0 AND 1000);
+CREATE TABLE IF NOT EXISTS meeting_absences (
+  meeting_id INT NOT NULL REFERENCES meetings(id) ON DELETE CASCADE,
+  scout_id INT NOT NULL REFERENCES scouts(id) ON DELETE CASCADE,
+  PRIMARY KEY (meeting_id, scout_id)
+);
+ALTER TABLE xp_log ADD COLUMN IF NOT EXISTS meeting_id INT REFERENCES meetings(id) ON DELETE CASCADE;
+CREATE UNIQUE INDEX IF NOT EXISTS xp_log_meeting_scout_idx ON xp_log(meeting_id, scout_id) WHERE meeting_id IS NOT NULL;
 
 -- the scout lists check for every scout whether it belongs to a leader account
 CREATE INDEX IF NOT EXISTS leaders_scout_idx ON leaders(scout_id);

@@ -527,3 +527,14 @@ header .menu-list a.signin { margin-top: .25rem; border-top: 1px solid var(--lin
 .panel.priv h4 { margin: .2rem 0 .4rem; font-size: .9rem; color: var(--muted); }
 .panel.priv .btn { margin-top: .9rem; }
 @media (max-width: 760px) { .priv-dl { grid-template-columns: minmax(0, 1fr); gap: 0; } .priv-dl dd { margin-bottom: .55rem; } }
+
+/* attendance sheet: one button per scout (filled = present) */
+.att-btn { min-width: 7.5rem; flex: none; }
+.chip { white-space: nowrap; }
+.att-btns { display: inline-flex; gap: .4rem; flex: none; }
+.att-btn.att-absent:not(.ghost) { background: var(--danger); border-color: var(--danger); color: #fff; }
+.att-btn.att-absent.ghost { color: var(--danger); border-color: var(--danger); }
+.filter-row { display: flex; gap: .5rem; margin: 0 0 .6rem; }
+.filter-row input { flex: 1; min-width: 0; }
+.filter-row select { flex: none; width: auto; max-width: 11rem; }
+@media (max-width: 760px) { .att-btn { min-width: 0; padding-inline: .5rem; } }

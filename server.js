@@ -107,6 +107,8 @@ const isAdmin = (l) => l.role === 'super_admin' || l.role === 'admin' || l.role 
 // a mod (مسؤول) works with the members, their activity and the patrols: the rest of the troop's setup (activities, roles/tags and who holds them) is closed to it
 const requireNotMod = (req, res, next) => (req.leader.role === 'mod' ? bad(res, 'forbidden', 403) : next());
 const requireAdmin = (req, res, next) => (isAdmin(req.leader) ? next() : bad(res, 'forbidden', 403));
+// activities (the troop's list of awards): admins and the super admin (not mods, not leaders)
+const requireActivityEditor = (req, res, next) => (req.leader.role === 'super_admin' || req.leader.role === 'admin' ? next() : bad(res, 'forbidden', 403));
 // roles and tags: admins and the super admin (not mods, not leaders)
 const requireLabelEditor = (req, res, next) => (req.leader.role === 'super_admin' || req.leader.role === 'admin' ? next() : bad(res, 'forbidden', 403));
 // the super admin alone: the troops, the accounts and the activity log
@@ -560,11 +562,19 @@ app.post('/api/scouts/:id/xp', requireLeader, wrap(async (req, res) => {
   const note = text(req.body?.note, 200);
   const day = date(req.body?.date);
   if (day && Date.parse(day) > Date.now() + 2 * 86400000) throw invalid(); // no dates in the future
-  const activityId = intId(req.body?.activity_id);
+  // a custom award: its own title and XP (any whole number but 0, as for activities), not from the troop's list
+  const custom = req.body?.custom === true;
+  let customAct = null;
+  if (custom) {
+    const title = text(req.body?.title, 80), cxp = Number(req.body?.xp);
+    if (!title || !Number.isInteger(cxp) || cxp === 0 || Math.abs(cxp) > 10000) throw invalid();
+    customAct = { id: null, name_en: title, name_ar: title, xp: cxp };
+  }
+  const activityId = custom ? null : intId(req.body?.activity_id);
   const sc = await scoutFor(req, id);
   if (!sc) return bad(res, 'not_found', 404);
   if (!(await pool.query('SELECT active FROM scouts WHERE id = $1', [id])).rows[0].active) return bad(res, 'scout_inactive', 409); // reactivate first
-  const a = await pool.query('SELECT * FROM activities WHERE id = $1 AND troop_id = $2', [activityId, sc.troop_id]); // each troop only uses its own activities
+  const a = custom ? { rows: [customAct] } : await pool.query('SELECT * FROM activities WHERE id = $1 AND troop_id = $2', [activityId, sc.troop_id]); // each troop only uses its own activities
   if (!a.rows[0]) return bad(res, 'not_found', 404);
   const act = a.rows[0];
   await pool.query(
@@ -589,7 +599,7 @@ app.get('/api/activities', requireLeader, wrap(async (req, res) => {
   res.json(rows);
 }));
 
-app.post('/api/activities', requireLeader, requireNotMod, wrap(async (req, res) => {
+app.post('/api/activities', requireLeader, requireActivityEditor, wrap(async (req, res) => {
   const en = text(req.body?.name_en, 60), ar = text(req.body?.name_ar, 60);
   const xp = Number(req.body?.xp);
   if ((!en && !ar) || !Number.isInteger(xp) || xp === 0 || xp < -10000 || xp > 10000) throw invalid();
@@ -599,7 +609,7 @@ app.post('/api/activities', requireLeader, requireNotMod, wrap(async (req, res) 
   res.status(201).json(rows[0]);
 }));
 
-app.delete('/api/activities/:id', requireLeader, requireNotMod, wrap(async (req, res) => {
+app.delete('/api/activities/:id', requireLeader, requireActivityEditor, wrap(async (req, res) => {
   const { rows } = await pool.query('DELETE FROM activities WHERE id = $1 AND troop_id = $2 RETURNING name_en, name_ar', [intId(req.params.id), req.troop]);
   if (rows[0]) audit(req.leader, 'activity_delete', rows[0], req.troop);
   res.json({ ok: true });
@@ -781,24 +791,46 @@ app.delete('/api/depot/bookings/:id', requireLeader, wrap(async (req, res) => {
   res.json({ ok: true });
 }));
 
-// ---- meetings attendance register (سجل حضور اجتماعات): every troop keeps its own meetings and marks which scouts were present.
+// ---- attendance register (الحضور): every troop keeps its own meetings and events and marks each scout present, absent, or neither.
+// Each meeting/event has an XP value for attending (default 10, 0 = none) that every scout marked present gets automatically as an XP entry
+// "Attended <title>", and an XP value taken for not attending (default 0 = none) that every scout marked absent loses ("Absent: <title>", a negative entry).
+// Changing or clearing a mark takes its XP back; deleting the meeting removes it all. Marks with XP go to the activity log.
 // Every signed-in account of the troop can take attendance; deleting a meeting is closed to mods. Leader-only: nothing here is public. ----
 const NOT_SUPER = "NOT EXISTS (SELECT 1 FROM leaders l WHERE l.scout_id = s.id AND l.role = 'super_admin')"; // the super admin belongs to no troop, so is never on an attendance sheet
 const meetingBody = (b) => {
   const day = date(b?.date);
   if (!day || Date.parse(day) > Date.now() + 2 * 86400000) throw invalid(); // a date is required; none in the future
-  return [day, text(b?.title, 80)];
+  const kind = b?.kind == null || b.kind === '' ? 'meeting' : b.kind;
+  if (!['meeting', 'event'].includes(kind)) throw invalid();
+  const title = text(b?.title, 80);
+  if (!title) throw invalid(); // a title is required
+  const xps = [b?.xp == null || b.xp === '' ? 10 : Number(b.xp), b?.absent_xp == null || b.absent_xp === '' ? 0 : Number(b.absent_xp)];
+  if (xps.some((x) => !Number.isInteger(x) || x < 0 || x > 1000)) throw invalid(); // XP for attending / taken for absence: 0 (none) to 1000
+  return [day, title, kind, ...xps];
 };
-const meetingOf = async (req, id) => (await pool.query('SELECT id, meeting_date, title FROM meetings WHERE id = $1 AND troop_id = $2', [id, req.troop])).rows[0];
+// the names of the XP entries: "Attended <title>" / "حضر <title>", "Absent: <title>" / "غاب عن <title>"
+const ATTENDED = ['Attended ', 'حضر '], ABSENT = ['Absent: ', 'غاب عن '];
+// give these scouts the XP of their mark for this meeting (the unique index allows one XP entry per scout and meeting, so a second grant is a no-op).
+// m = { id, xp, absent_xp }; present = true: +xp as attended, false: -absent_xp as absent
+async function grantMarkXp(c, m, scoutIds, leader, present) {
+  const xp = present ? m.xp : m.absent_xp;
+  if (!scoutIds.length || !xp) return;
+  const names = present ? ATTENDED : ABSENT;
+  await c.query(
+    `INSERT INTO xp_log (scout_id, activity, activity_ar, xp, note, leader_id, activity_date, meeting_id)
+     SELECT sid, $2::text || mt.title, $3::text || mt.title, $4, NULL, $5, mt.meeting_date, mt.id FROM meetings mt, unnest($1::int[]) AS sid WHERE mt.id = $6
+     ON CONFLICT (meeting_id, scout_id) WHERE meeting_id IS NOT NULL DO NOTHING`, [scoutIds, names[0], names[1], present ? xp : -xp, leader.id, m.id]);
+}
+const meetingOf = async (req, id) => (await pool.query('SELECT id, meeting_date, title, kind, xp, absent_xp FROM meetings WHERE id = $1 AND troop_id = $2', [id, req.troop])).rows[0];
 
 app.get('/api/meetings', requireLeader, wrap(async (req, res) => {
   res.json((await pool.query(
-    `SELECT m.id, m.meeting_date, m.title,
+    `SELECT m.id, m.meeting_date, m.title, m.kind, m.xp, m.absent_xp,
        (SELECT COUNT(*) FROM meeting_attendance a JOIN scouts s ON s.id = a.scout_id WHERE a.meeting_id = m.id AND s.active AND ${NOT_SUPER})::int AS present
      FROM meetings m WHERE m.troop_id = $1 ORDER BY m.meeting_date DESC, m.id DESC LIMIT 300`, [req.troop])).rows);
 }));
 
-// per scout: meetings attended out of the troop's meetings held since the scout joined
+// per scout: meetings and events attended out of the troop's held since the scout joined
 app.get('/api/attendance/summary', requireLeader, wrap(async (req, res) => {
   res.json((await pool.query(
     `SELECT s.id, COUNT(m.id)::int AS total, COUNT(a.scout_id)::int AS attended
@@ -809,60 +841,116 @@ app.get('/api/attendance/summary', requireLeader, wrap(async (req, res) => {
 }));
 
 app.post('/api/meetings', requireLeader, wrap(async (req, res) => {
-  const [day, title] = meetingBody(req.body);
-  const { rows } = await pool.query('INSERT INTO meetings (troop_id, meeting_date, title, created_by) VALUES ($1,$2,$3,$4) RETURNING id, meeting_date, title', [req.troop, day, title, req.leader.id]);
-  audit(req.leader, 'meeting_add', { name: `${day}${title ? ' ' + title : ''}` }, req.troop);
+  const [day, title, kind, xp, absentXp] = meetingBody(req.body);
+  const { rows } = await pool.query('INSERT INTO meetings (troop_id, meeting_date, title, kind, xp, absent_xp, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, meeting_date, title, kind, xp, absent_xp', [req.troop, day, title, kind, xp, absentXp, req.leader.id]);
+  audit(req.leader, 'meeting_add', { name: `${day} ${title}` }, req.troop);
   res.status(201).json({ ...rows[0], present: 0 });
 }));
 
 app.get('/api/meetings/:id', requireLeader, wrap(async (req, res) => {
   const m = await meetingOf(req, intId(req.params.id));
   if (!m) return bad(res, 'not_found', 404);
-  const ids = (await pool.query('SELECT scout_id FROM meeting_attendance WHERE meeting_id = $1', [m.id])).rows.map((r) => r.scout_id);
-  res.json({ ...m, present_ids: ids });
+  const [pres, abs] = await Promise.all([
+    pool.query('SELECT scout_id FROM meeting_attendance WHERE meeting_id = $1', [m.id]),
+    pool.query('SELECT scout_id FROM meeting_absences WHERE meeting_id = $1', [m.id])]);
+  res.json({ ...m, present_ids: pres.rows.map((r) => r.scout_id), absent_ids: abs.rows.map((r) => r.scout_id) });
 }));
 
 app.put('/api/meetings/:id', requireLeader, wrap(async (req, res) => {
-  const [day, title] = meetingBody(req.body);
+  const [day, title, kind, xp, absentXp] = meetingBody(req.body);
   const m = await meetingOf(req, intId(req.params.id));
   if (!m) return bad(res, 'not_found', 404);
-  await pool.query('UPDATE meetings SET meeting_date = $1, title = $2 WHERE id = $3', [day, title, m.id]);
-  audit(req.leader, 'meeting_update', { name: `${day}${title ? ' ' + title : ''}` }, req.troop);
+  await tx(async (c) => {
+    await c.query('UPDATE meetings SET meeting_date = $1, title = $2, kind = $3, xp = $4, absent_xp = $5 WHERE id = $6', [day, title, kind, xp, absentXp, m.id]);
+    // the XP already given follows the meeting's new date, title and values: for the present (table meeting_attendance) and the absent (meeting_absences)
+    for (const [table, names, newXp, oldXp, sign, isPresent] of [['meeting_attendance', ATTENDED, xp, m.xp, 1, true], ['meeting_absences', ABSENT, absentXp, m.absent_xp, -1, false]]) {
+      if (newXp === 0) {
+        await c.query(`DELETE FROM xp_log x USING ${table} t WHERE x.meeting_id = $1 AND t.meeting_id = x.meeting_id AND t.scout_id = x.scout_id`, [m.id]); // none for this mark any more
+      } else {
+        await c.query(`UPDATE xp_log x SET activity = $1::text || $3::text, activity_ar = $2::text || $3::text, xp = $4, note = NULL, activity_date = $5 FROM ${table} t WHERE x.meeting_id = $6 AND t.meeting_id = x.meeting_id AND t.scout_id = x.scout_id`,
+          [names[0], names[1], title, sign * newXp, day, m.id]);
+        if (!oldXp) { // it was off: the scouts already marked get it now
+          const ids = (await c.query(`SELECT t.scout_id FROM ${table} t JOIN scouts s ON s.id = t.scout_id WHERE t.meeting_id = $1 AND s.active AND ${NOT_SUPER}`, [m.id])).rows.map((r) => r.scout_id);
+          await grantMarkXp(c, { id: m.id, xp, absent_xp: absentXp }, ids, req.leader, isPresent);
+        }
+      }
+    }
+  });
+  audit(req.leader, 'meeting_update', { name: `${day} ${title}` }, req.troop);
   res.json({ ok: true });
 }));
 
 app.delete('/api/meetings/:id', requireLeader, requireNotMod, wrap(async (req, res) => {
-  const { rows } = await pool.query('DELETE FROM meetings WHERE id = $1 AND troop_id = $2 RETURNING meeting_date, title', [intId(req.params.id), req.troop]);
+  const { rows } = await pool.query('DELETE FROM meetings WHERE id = $1 AND troop_id = $2 RETURNING meeting_date, title', [intId(req.params.id), req.troop]); // its marks and the XP they gave go with it
   if (rows[0]) audit(req.leader, 'meeting_delete', { name: `${rows[0].meeting_date}${rows[0].title ? ' ' + rows[0].title : ''}` }, req.troop);
   res.json({ ok: true });
 }));
 
-// everyone at once: present = true marks all of the troop's active scouts present, false clears the sheet
+// everyone at once. status: 'present' = every active scout of the troop present; 'absent' = the scouts with no mark yet absent; 'none' = clear the whole sheet.
+// One activity log entry per action (only when XP is involved).
 app.put('/api/meetings/:id/attendance', requireLeader, wrap(async (req, res) => {
   const m = await meetingOf(req, intId(req.params.id));
   if (!m) return bad(res, 'not_found', 404);
-  if (typeof req.body?.present !== 'boolean') throw invalid();
-  if (req.body.present) {
-    await pool.query(
-      `INSERT INTO meeting_attendance (meeting_id, scout_id) SELECT $1, s.id FROM scouts s WHERE s.troop_id = $2 AND s.active AND ${NOT_SUPER} ON CONFLICT DO NOTHING`, [m.id, req.troop]);
-  } else {
-    await pool.query('DELETE FROM meeting_attendance WHERE meeting_id = $1', [m.id]);
+  const status = req.body?.status;
+  if (!['present', 'absent', 'none'].includes(status)) throw invalid();
+  const everyone = `SELECT s.id FROM scouts s WHERE s.troop_id = $2 AND s.active AND ${NOT_SUPER}`;
+  const count = await tx(async (c) => {
+    if (status === 'present') {
+      // scouts marked absent become present: their absence (and its XP) goes first
+      await c.query(`DELETE FROM xp_log x USING meeting_absences t WHERE x.meeting_id = $1 AND t.meeting_id = x.meeting_id AND t.scout_id = x.scout_id AND t.scout_id IN (${everyone})`, [m.id, req.troop]);
+      await c.query(`DELETE FROM meeting_absences WHERE meeting_id = $1 AND scout_id IN (${everyone})`, [m.id, req.troop]);
+      const r = await c.query(`INSERT INTO meeting_attendance (meeting_id, scout_id) ${everyone.replace('SELECT s.id', 'SELECT $1, s.id')} ON CONFLICT DO NOTHING RETURNING scout_id`, [m.id, req.troop]);
+      await grantMarkXp(c, m, r.rows.map((x) => x.scout_id), req.leader, true); // only those newly marked
+      return r.rowCount;
+    }
+    if (status === 'absent') {
+      const r = await c.query(
+        `INSERT INTO meeting_absences (meeting_id, scout_id) SELECT $1, s.id FROM scouts s WHERE s.troop_id = $2 AND s.active AND ${NOT_SUPER}
+           AND NOT EXISTS (SELECT 1 FROM meeting_attendance a WHERE a.meeting_id = $1 AND a.scout_id = s.id) ON CONFLICT DO NOTHING RETURNING scout_id`, [m.id, req.troop]);
+      await grantMarkXp(c, m, r.rows.map((x) => x.scout_id), req.leader, false);
+      return r.rowCount;
+    }
+    const p = await c.query('DELETE FROM meeting_attendance WHERE meeting_id = $1', [m.id]);
+    const a = await c.query('DELETE FROM meeting_absences WHERE meeting_id = $1', [m.id]);
+    await c.query('DELETE FROM xp_log WHERE meeting_id = $1', [m.id]);
+    return { present: p.rowCount, absent: a.rowCount };
+  });
+  if (status === 'present' && count && m.xp) audit(req.leader, 'attendance_bulk', { title: m.title, xp: m.xp, count }, req.troop);
+  if (status === 'absent' && count && m.absent_xp) audit(req.leader, 'absence_bulk', { title: m.title, xp: -m.absent_xp, count }, req.troop);
+  if (status === 'none') {
+    if (count.present && m.xp) audit(req.leader, 'attendance_bulk_undo', { title: m.title, xp: m.xp, count: count.present }, req.troop);
+    if (count.absent && m.absent_xp) audit(req.leader, 'absence_bulk_undo', { title: m.title, xp: -m.absent_xp, count: count.absent }, req.troop);
   }
   res.json({ ok: true });
 }));
 
-// one scout: present = true / false
+// one scout: status = 'present' | 'absent' | 'none'. Changing a mark takes the old mark's XP back and gives the new one's.
 app.put('/api/meetings/:id/attendance/:scoutId', requireLeader, wrap(async (req, res) => {
   const m = await meetingOf(req, intId(req.params.id));
   if (!m) return bad(res, 'not_found', 404);
-  if (typeof req.body?.present !== 'boolean') throw invalid();
+  const status = req.body?.status;
+  if (!['present', 'absent', 'none'].includes(status)) throw invalid();
   const sid = intId(req.params.scoutId);
-  if (req.body.present) {
-    const ok = await pool.query(`SELECT 1 FROM scouts s WHERE s.id = $1 AND s.troop_id = $2 AND s.active AND ${NOT_SUPER}`, [sid, req.troop]); // only an active scout of this troop
-    if (!ok.rowCount) return bad(res, 'not_found', 404);
-    await pool.query('INSERT INTO meeting_attendance (meeting_id, scout_id) VALUES ($1,$2) ON CONFLICT DO NOTHING', [m.id, sid]);
-  } else {
-    await pool.query('DELETE FROM meeting_attendance WHERE meeting_id = $1 AND scout_id = $2', [m.id, sid]);
+  const sc = (await pool.query(`SELECT s.name, s.active, ${NOT_SUPER} AS ok FROM scouts s WHERE s.id = $1 AND s.troop_id = $2`, [sid, req.troop])).rows[0]; // only a scout of this troop
+  if (!sc || (status !== 'none' && !(sc.active && sc.ok))) return bad(res, 'not_found', 404); // marking: an active scout; the super admin is never on a sheet
+  const before = await tx(async (c) => {
+    const was = (await c.query('SELECT EXISTS (SELECT 1 FROM meeting_attendance WHERE meeting_id = $1 AND scout_id = $2) AS p, EXISTS (SELECT 1 FROM meeting_absences WHERE meeting_id = $1 AND scout_id = $2) AS a', [m.id, sid])).rows[0];
+    const prev = was.p ? 'present' : was.a ? 'absent' : 'none';
+    if (prev === status) return prev; // nothing changes
+    await c.query('DELETE FROM meeting_attendance WHERE meeting_id = $1 AND scout_id = $2', [m.id, sid]);
+    await c.query('DELETE FROM meeting_absences WHERE meeting_id = $1 AND scout_id = $2', [m.id, sid]);
+    await c.query('DELETE FROM xp_log WHERE meeting_id = $1 AND scout_id = $2', [m.id, sid]); // the old mark's XP is taken back
+    if (status === 'present') await c.query('INSERT INTO meeting_attendance (meeting_id, scout_id) VALUES ($1,$2)', [m.id, sid]);
+    if (status === 'absent') await c.query('INSERT INTO meeting_absences (meeting_id, scout_id) VALUES ($1,$2)', [m.id, sid]);
+    if (status !== 'none') await grantMarkXp(c, m, [sid], req.leader, status === 'present');
+    return prev;
+  });
+  if (before !== status) {
+    const meta = (xp) => ({ name: sc.name, title: m.title, xp });
+    if (before === 'present' && m.xp) audit(req.leader, 'attendance_undo', meta(m.xp), req.troop);
+    if (before === 'absent' && m.absent_xp) audit(req.leader, 'absence_undo', meta(-m.absent_xp), req.troop);
+    if (status === 'present' && m.xp) audit(req.leader, 'attendance', meta(m.xp), req.troop);
+    if (status === 'absent' && m.absent_xp) audit(req.leader, 'absence', meta(-m.absent_xp), req.troop);
   }
   res.json({ ok: true });
 }));
