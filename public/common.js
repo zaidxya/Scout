@@ -183,6 +183,9 @@ const norm = (v) => String(v ?? '').toLowerCase().normalize('NFKD')
   .replace(/[\u064B-\u065F\u0670\u0640]/g, '').replace(/[أإآ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه');
 
 // patrols (optional): the troop's patrols; when it has any, the list is split under a heading per patrol, with scouts in none last
+// does the troop being looked at use the XP system? (pages call setXpEnabled when the troop is known; off hides every XP number and history)
+let xpEnabled = true;
+const setXpEnabled = (v) => { xpEnabled = v !== false; };
 function renderScoutList(ul, scouts, selectedId, onSelect, extra, emptyKey = 'no_scouts', patrols = []) {
   ul.replaceChildren();
   if (!scouts.length) {
@@ -191,7 +194,7 @@ function renderScoutList(ul, scouts, selectedId, onSelect, extra, emptyKey = 'no
   }
   const row = (s) => el('li', {},
     el('button', { type: 'button', 'aria-current': String(s.id === selectedId), onclick: () => onSelect(s.id) },
-      avatar(s), el('span', { class: 'nm' }, s.name, extra ? extra(s) : ''), el('span', { class: 'xp' + (s.total_xp < 0 ? ' neg' : '') }, `${fmt(s.total_xp)} ${t('xp')}`)));
+      avatar(s), el('span', { class: 'nm' }, s.name, extra ? extra(s) : ''), xpEnabled ? el('span', { class: 'xp' + (s.total_xp < 0 ? ' neg' : '') }, `${fmt(s.total_xp)} ${t('xp')}`) : ''));
   if (!patrols.length) { scouts.forEach((s) => ul.append(row(s))); return; }
   const group = (title, list) => { if (list.length) ul.append(el('li', { class: 'group-head' }, el('span', {}, title), el('small', {}, fmt(list.length))), ...list.map(row)); };
   // leader accounts (in_council) are in the leaders' patrol as well as their own patrol, so they are listed under both
@@ -206,10 +209,11 @@ function renderDetailHead(scout, showRoles = true) {
     avatar(scout, true),
     hasRoles ? el('div', { style: 'flex:1;min-width:8rem' }, el('h2', { style: 'margin-bottom:.35rem' }, scout.name), roleChips(scout.roles))
              : el('h2', {}, scout.name),
-    el('div', { class: 'badge' + (scout.total_xp < 0 ? ' neg' : '') }, el('b', {}, fmt(scout.total_xp)), el('span', {}, t('xp'))));
+    xpEnabled ? el('div', { class: 'badge' + (scout.total_xp < 0 ? ' neg' : '') }, el('b', {}, fmt(scout.total_xp)), el('span', {}, t('xp'))) : '');
 }
 
 function renderLog(scout, onUndo) {
+  if (!xpEnabled) return el('span'); // no XP in this troop: no activity history
   const wrap = el('div', {}, el('h3', {}, t('activity_log')));
   if (!scout.log.length) { wrap.append(el('p', { class: 'empty' }, t('no_activity'))); return wrap; }
   const ul = el('ul', { class: 'log' });

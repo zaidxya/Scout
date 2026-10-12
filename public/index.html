@@ -108,7 +108,11 @@
       return p;
     }
     function useTroopWord(id) {
-      const th = troops.find((x) => x.id === id)?.theme;
+      const tr = troops.find((x) => x.id === id);
+      // does this troop use XP? (remembered like the theme, for the first paint before the troop list is loaded)
+      if (tr) { try { localStorage.setItem('xp_' + id, tr.xp_enabled === false ? '0' : '1'); } catch { /* ignore */ } setXpEnabled(tr.xp_enabled); }
+      else { let c = null; try { c = localStorage.getItem('xp_' + id); } catch { /* ignore */ } setXpEnabled(c !== '0'); }
+      const th = tr?.theme;
       if (th) { try { localStorage.setItem('unit_theme_' + id, th); } catch { /* ignore */ } setUnitTheme(th); setTroopTint(th); }
       else { let c = null; try { c = localStorage.getItem('unit_theme_' + id); } catch { /* ignore */ } setUnitTheme(c); setTroopTint(c); }
     }

@@ -22,6 +22,8 @@ ALTER TABLE scouts
   ADD COLUMN IF NOT EXISTS notes TEXT,
   ADD COLUMN IF NOT EXISTS photo BYTEA,
   ADD COLUMN IF NOT EXISTS photo_v INT NOT NULL DEFAULT 0;
+-- photo_hidden: the picture is kept but not shown on the public dashboard (the leader area still shows it)
+ALTER TABLE scouts ADD COLUMN IF NOT EXISTS photo_hidden BOOLEAN NOT NULL DEFAULT false;
 CREATE TABLE IF NOT EXISTS activities (
   id SERIAL PRIMARY KEY,
   name_en TEXT NOT NULL,
@@ -79,6 +81,11 @@ CREATE TABLE IF NOT EXISTS troops (
 );
 -- visual identity shown to the troop's leaders after sign-in (NULL = main site look)
 ALTER TABLE troops ADD COLUMN IF NOT EXISTS theme TEXT;
+-- troops are levels: a scout can only be promoted to a troop with a higher level (existing troops start at their order of creation)
+ALTER TABLE troops ADD COLUMN IF NOT EXISTS level INT;
+-- the XP system is optional per troop: when off, the troop's pages show no XP, no XP can be awarded and attendance gives none (existing XP stays stored)
+ALTER TABLE troops ADD COLUMN IF NOT EXISTS xp_enabled BOOLEAN NOT NULL DEFAULT true;
+UPDATE troops SET level = id WHERE level IS NULL;
 -- text shown next to the logo for this troop's leaders (NULL = the site name)
 ALTER TABLE troops ADD COLUMN IF NOT EXISTS brand_en TEXT;
 ALTER TABLE troops ADD COLUMN IF NOT EXISTS brand_ar TEXT;
@@ -181,45 +188,54 @@ CREATE TABLE IF NOT EXISTS meeting_absences (
   scout_id INT NOT NULL REFERENCES scouts(id) ON DELETE CASCADE,
   PRIMARY KEY (meeting_id, scout_id)
 );
+-- excused: absent with an excuse (no XP taken); false = no excuse (loses the meeting's absence XP)
+ALTER TABLE meeting_absences ADD COLUMN IF NOT EXISTS excused BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE xp_log ADD COLUMN IF NOT EXISTS meeting_id INT REFERENCES meetings(id) ON DELETE CASCADE;
 CREATE UNIQUE INDEX IF NOT EXISTS xp_log_meeting_scout_idx ON xp_log(meeting_id, scout_id) WHERE meeting_id IS NOT NULL;
 
 -- the scout lists check for every scout whether it belongs to a leader account
 CREATE INDEX IF NOT EXISTS leaders_scout_idx ON leaders(scout_id);
 
--- depot reservations, made for a troop: one booking holds a basket of items (each with a quantity) for one time window.
--- An item can't be booked beyond its quantity at any time. leader_name keeps who made it after the account is gone.
-CREATE TABLE IF NOT EXISTS depot_bookings (
+-- depot takes: items are taken out of the depot at once (now), for a troop, and put back later. A take holds a basket of items (each with a
+-- quantity) and counts against the stock until returned_at is set. leader_name keeps who took it after the account is gone.
+CREATE TABLE IF NOT EXISTS depot_takes (
   id SERIAL PRIMARY KEY,
   troop_id INT NOT NULL REFERENCES troops(id) ON DELETE CASCADE,
-  starts_at TIMESTAMPTZ NOT NULL,
-  ends_at TIMESTAMPTZ NOT NULL,
+  taken_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  returned_at TIMESTAMPTZ,
   note TEXT,
   leader_id INT REFERENCES leaders(id) ON DELETE SET NULL,
   leader_name TEXT NOT NULL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-  CHECK (ends_at > starts_at)
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE INDEX IF NOT EXISTS depot_bookings_ends_idx ON depot_bookings(ends_at);
-CREATE TABLE IF NOT EXISTS depot_booking_items (
-  booking_id INT NOT NULL REFERENCES depot_bookings(id) ON DELETE CASCADE,
+CREATE INDEX IF NOT EXISTS depot_takes_returned_idx ON depot_takes(returned_at);
+CREATE TABLE IF NOT EXISTS depot_take_items (
+  take_id INT NOT NULL REFERENCES depot_takes(id) ON DELETE CASCADE,
   item_id INT NOT NULL REFERENCES depot_items(id) ON DELETE CASCADE,
   quantity INT NOT NULL CHECK (quantity > 0),
-  PRIMARY KEY (booking_id, item_id)
+  PRIMARY KEY (take_id, item_id)
 );
-CREATE INDEX IF NOT EXISTS depot_booking_items_item_idx ON depot_booking_items(item_id);
--- build 34 kept one row per item (depot_reservations): each becomes a one-item booking of the troop it was made for
--- (the super admin's had no troop: they go to the first troop), then the old table is dropped. Runs once.
+CREATE INDEX IF NOT EXISTS depot_take_items_item_idx ON depot_take_items(item_id);
+-- the reservations of builds 34-46 become takes (reserving is gone): the ones that had already started are kept (taken at their start; put back at
+-- their end if that has passed, otherwise still out), the ones that hadn't started are dropped. The old tables are then dropped. Runs once.
 DO $$
-DECLARE r RECORD; bid INT; first_troop INT;
+DECLARE r RECORD; tid INT; first_troop INT;
 BEGIN
+  SELECT id INTO first_troop FROM troops ORDER BY id LIMIT 1;
+  IF to_regclass('depot_bookings') IS NOT NULL THEN
+    FOR r IN SELECT * FROM depot_bookings WHERE starts_at <= now() ORDER BY id LOOP
+      INSERT INTO depot_takes (troop_id, taken_at, returned_at, note, leader_id, leader_name, created_at)
+        VALUES (r.troop_id, r.starts_at, CASE WHEN r.ends_at <= now() THEN r.ends_at END, r.note, r.leader_id, r.leader_name, r.created_at) RETURNING id INTO tid;
+      INSERT INTO depot_take_items (take_id, item_id, quantity) SELECT tid, item_id, quantity FROM depot_booking_items WHERE booking_id = r.id;
+    END LOOP;
+    DROP TABLE depot_booking_items;
+    DROP TABLE depot_bookings;
+  END IF;
   IF to_regclass('depot_reservations') IS NOT NULL THEN
-    SELECT id INTO first_troop FROM troops ORDER BY id LIMIT 1;
-    FOR r IN SELECT * FROM depot_reservations ORDER BY id LOOP
-      CONTINUE WHEN COALESCE(r.troop_id, first_troop) IS NULL;
-      INSERT INTO depot_bookings (troop_id, starts_at, ends_at, note, leader_id, leader_name, created_at)
-        VALUES (COALESCE(r.troop_id, first_troop), r.starts_at, r.ends_at, r.note, r.leader_id, r.leader_name, r.created_at) RETURNING id INTO bid;
-      INSERT INTO depot_booking_items (booking_id, item_id, quantity) VALUES (bid, r.item_id, r.quantity);
+    FOR r IN SELECT * FROM depot_reservations WHERE starts_at <= now() AND COALESCE(troop_id, first_troop) IS NOT NULL ORDER BY id LOOP
+      INSERT INTO depot_takes (troop_id, taken_at, returned_at, note, leader_id, leader_name, created_at)
+        VALUES (COALESCE(r.troop_id, first_troop), r.starts_at, CASE WHEN r.ends_at <= now() THEN r.ends_at END, r.note, r.leader_id, r.leader_name, r.created_at) RETURNING id INTO tid;
+      INSERT INTO depot_take_items (take_id, item_id, quantity) VALUES (tid, r.item_id, r.quantity);
     END LOOP;
     DROP TABLE depot_reservations;
   END IF;

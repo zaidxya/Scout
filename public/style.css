@@ -538,3 +538,26 @@ header .menu-list a.signin { margin-top: .25rem; border-top: 1px solid var(--lin
 .filter-row input { flex: 1; min-width: 0; }
 .filter-row select { flex: none; width: auto; max-width: 11rem; }
 @media (max-width: 760px) { .att-btn { min-width: 0; padding-inline: .5rem; } }
+
+/* leader area: the collapsed Administration menu at the end of the tab row (super admin); its list is fixed-positioned by script so the sideways-scrolling row can't clip it */
+.tabs .tab-menu { flex: none; position: static; }
+.tabs .tab-menu > summary { list-style: none; cursor: pointer; font-weight: 600; color: var(--muted); padding: .6rem 1rem; margin-bottom: -2px; border-bottom: 3px solid transparent; white-space: nowrap; }
+.tabs .tab-menu > summary::-webkit-details-marker { display: none; }
+.tabs .tab-menu > summary::after { content: ''; display: inline-block; width: .4rem; height: .4rem; margin-inline-start: .45rem; border: solid currentColor; border-width: 0 2px 2px 0; transform: translateY(-.15rem) rotate(45deg); }
+.tabs .tab-menu[open] > summary::after { transform: translateY(0) rotate(225deg); }
+.tabs .tab-menu > summary.on { color: var(--primary); border-bottom-color: var(--primary); }
+.tabs .tab-menu > summary:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; }
+.tabs .tab-menu-list { position: fixed; z-index: 30; min-width: 11rem; display: flex; flex-direction: column; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; padding: .3rem; box-shadow: 0 8px 24px rgba(var(--primary-rgb), .15); }
+.tabs .tab-menu-list button { margin: 0; border: 0; border-radius: 8px; padding: .55rem .8rem; text-align: start; }
+.tabs .tab-menu-list button:hover { background: var(--accent-soft); }
+.tabs .tab-menu-list button[aria-selected=true] { color: var(--primary); background: var(--accent-soft); }
+/* depot takes: one line per item, the quantity in a badge */
+.take-items { list-style: none; margin: .35rem 0 .3rem; padding: 0; display: grid; gap: .3rem; max-width: 28rem; }
+.take-items li { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: .25rem .4rem .25rem .6rem; border-radius: 8px; background: var(--accent-soft); }
+.take-name { min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
+.take-qty { flex: none; min-width: 3rem; text-align: center; padding: .1rem .7rem; border-radius: 999px; background: var(--primary); color: var(--on-primary); font-size: 1.05rem; font-weight: 800; font-variant-numeric: tabular-nums; direction: ltr; unicode-bidi: isolate; }
+.depot-item.over .take-qty { background: var(--muted); }
+.check { display: flex; align-items: center; gap: .5rem; cursor: pointer; }
+.check input { width: auto; margin: 0; }
+.att-btn.att-excused:not(.ghost) { background: var(--muted); border-color: var(--muted); color: #fff; }
+@media (max-width: 760px) { .att-btns { flex-wrap: wrap; justify-content: flex-end; } }

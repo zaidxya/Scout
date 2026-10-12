@@ -39,8 +39,14 @@
         <button id="btn-attendance" type="button" role="tab" data-i18n="tab_attendance"></button>
         <button id="btn-labels" type="button" role="tab" data-i18n="tab_labels"></button>
         <button id="btn-troops" type="button" role="tab" data-i18n="tab_troops"></button>
-        <button id="btn-leaders" type="button" role="tab" data-i18n="tab_leaders"></button>
-        <button id="btn-log" type="button" role="tab" data-i18n="tab_log"></button>
+        <!-- super admin only: Leaders and the activity log live in this collapsed menu -->
+        <details id="adminMenu" class="tab-menu hidden">
+          <summary id="adminSummary" data-i18n="tab_admin"></summary>
+          <div id="adminList" class="tab-menu-list" role="menu">
+            <button id="btn-leaders" type="button" role="tab" data-i18n="tab_leaders"></button>
+            <button id="btn-log" type="button" role="tab" data-i18n="tab_log"></button>
+          </div>
+        </details>
       </div>
       <p id="toast" class="error" role="status"></p>
 
@@ -99,19 +105,21 @@
         <div id="attHome">
           <div class="panel">
             <h2 data-i18n="tab_attendance"></h2>
-            <p class="hint" data-i18n="att_hint"></p>
+            <p id="attHint" class="hint" data-i18n="att_hint"></p>
             <form id="meetingForm">
               <h3 data-i18n="att_new_meeting"></h3>
               <div class="grid2">
                 <label><span data-i18n="att_date"></span><input name="date" type="date" required></label>
                 <label><span data-i18n="att_title"></span><input name="title" type="text" maxlength="80" required></label>
               </div>
-              <div class="grid2">
-                <label><span data-i18n="att_type"></span><select name="kind"><option value="meeting" data-i18n="att_kind_meeting"></option><option value="event" data-i18n="att_kind_event"></option></select></label>
-                <label><span data-i18n="att_xp"></span><input name="xp" type="number" min="0" max="1000" step="1" value="10" required></label>
+              <label><span data-i18n="att_type"></span><select name="kind" style="max-width:12rem"><option value="meeting" data-i18n="att_kind_meeting"></option><option value="event" data-i18n="att_kind_event"></option></select></label>
+              <div id="meetingXp">
+                <div class="grid2">
+                  <label><span data-i18n="att_xp"></span><input name="xp" type="number" min="0" max="1000" step="1" value="10" required></label>
+                  <label><span data-i18n="att_absent_xp"></span><input name="absent_xp" type="number" min="0" max="1000" step="1" value="0" required></label>
+                </div>
+                <p class="hint" data-i18n="att_xp_field_hint"></p>
               </div>
-              <label><span data-i18n="att_absent_xp"></span><input name="absent_xp" type="number" min="0" max="1000" step="1" value="0" required style="max-width:12rem"></label>
-              <p class="hint" data-i18n="att_xp_field_hint"></p>
               <button class="btn" type="submit" data-i18n="add"></button>
             </form>
           </div>
@@ -175,6 +183,10 @@
               <label><span data-i18n="brand_en"></span><input name="brand_en" type="text" maxlength="40"></label>
               <label><span data-i18n="brand_ar"></span><input name="brand_ar" type="text" maxlength="40" dir="rtl"></label>
             </div>
+            <label class="check"><input name="xp_enabled" type="checkbox" checked> <span data-i18n="troop_xp"></span></label>
+            <p class="hint" data-i18n="troop_xp_hint"></p>
+            <label><span data-i18n="troop_level"></span><input name="level" type="number" min="1" max="1000" step="1" style="max-width:8rem"></label>
+            <p class="hint" data-i18n="troop_level_hint"></p>
             <label><span data-i18n="troop_theme"></span><select name="theme" id="newTroopTheme"></select></label>
             <label><span data-i18n="copy_from"></span><select name="copy_from" id="copyFrom"></select></label>
             <p class="hint" data-i18n="copy_from_hint"></p>
@@ -210,12 +222,13 @@
     let scouts = [], current = null, data = null, det = null, acts = [], labels = [], patrols = [], leaders = [], troops = [], me = '', myRole = 'admin', myTroop = null; // myTroop: the account's own troop (null for the super admin, who is not bound to one)
     const activeTroop = () => state.troop; // the troop being worked on: myTroop, or whichever one the super admin or a leader switched to
     const isSuper = () => myRole === 'super_admin';
-    const roams = () => myRole === 'super_admin' || myRole === 'leader'; // can switch between troops (leaders have a home troop, the super admin none)
+    const roams = () => myRole === 'super_admin' || myRole === 'leader';
+    const xpOn = () => troopById(activeTroop())?.xp_enabled !== false; // does the troop being worked on use the XP system? // can switch between troops (leaders have a home troop, the super admin none)
     const TABS = ['scouts', 'activities', 'patrols', 'attendance', 'labels', 'troops', 'leaders', 'log'];
     const isMod = () => myRole === 'mod'; // a mod (مسؤول) has the members, their activity and the patrols (and its own password)
     const canLabels = () => isSuper() || myRole === 'admin'; // roles and tags: not for mods or leaders
     // troops, accounts and the activity log are for the super admin only; roles & tags and activities also for admins (not leaders); a mod has just scouts, patrols and attendance
-    const tabAllowed = (n) => isMod() ? (n === 'scouts' || n === 'patrols' || n === 'attendance') : (n === 'troops' || n === 'leaders' || n === 'log' ? isSuper() : n === 'labels' ? canLabels() : n === 'activities' ? myRole !== 'leader' : true);
+    const tabAllowed = (n) => isMod() ? (n === 'scouts' || n === 'patrols' || n === 'attendance') : (n === 'troops' || n === 'leaders' || n === 'log' ? isSuper() : n === 'labels' ? canLabels() : n === 'activities' ? myRole !== 'leader' && xpOn() : true);
 
     const msg = (text, ok) => { $('toast').textContent = text || ''; $('toast').className = 'error' + (ok ? ' ok' : ''); };
     const fail = (e) => { if (e.status === 401 && e.code === 'unauthorized') show(false); msg(errText(e)); };
@@ -229,10 +242,12 @@
     // hide the admin-only and super-admin-only pieces from everyone else
     function applyRole() {
       TABS.forEach((x) => $('btn-' + x).classList.toggle('hidden', !tabAllowed(x)));
+      $('adminMenu').classList.toggle('hidden', !isSuper()); // Leaders and Activity log: super admin only
     }
     function showTab(n) {
       if (!tabAllowed(n)) n = 'scouts';
-      msg('');
+      msg(''); $('adminMenu').open = false;
+      $('adminSummary').classList.toggle('on', n === 'leaders' || n === 'log'); // the menu's title is lit while one of its pages is open
       TABS.forEach((x) => {
         $('tab-' + x).classList.toggle('hidden', x !== n);
         $('btn-' + x).setAttribute('aria-selected', String(x === n));
@@ -247,6 +262,18 @@
       if (n === 'log') loadLog();
     }
     TABS.forEach((x) => $('btn-' + x).addEventListener('click', () => showTab(x)));
+    {
+      const menu = $('adminMenu'), list = $('adminList');
+      menu.addEventListener('toggle', () => {
+        if (!menu.open) return;
+        const r = $('adminSummary').getBoundingClientRect(), rtl = getComputedStyle(document.documentElement).direction === 'rtl';
+        list.style.top = r.bottom + 'px';
+        list.style.left = rtl ? 'auto' : r.left + 'px'; list.style.right = rtl ? Math.max(0, innerWidth - r.right) + 'px' : 'auto';
+      });
+      document.addEventListener('click', (ev) => { if (menu.open && !menu.contains(ev.target)) menu.open = false; });
+      menu.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') { menu.open = false; $('adminSummary').focus(); } });
+      $('adminSummary').closest('.tabs').addEventListener('scroll', () => { menu.open = false; });
+    }
 
     // ---------- scouts ----------
     const labelName = (l) => (state.lang === 'ar' ? l.name_ar : l.name_en);
@@ -282,6 +309,8 @@
       state.troop = ok ? id : troops[0]?.id ?? null;
       if (roams()) { try { localStorage.setItem('leaderTroop', String(state.troop)); } catch { /* ignore */ } }
       const tr = troopById(state.troop);
+      setXpEnabled(tr?.xp_enabled); // off: no XP anywhere for this troop
+      if (TABS.every((x) => $('btn-' + x))) { applyRole(); const open = TABS.find((x) => !$('tab-' + x).classList.contains('hidden')); if (open && !tabAllowed(open)) showTab('scouts'); }
       setUnitTheme(tr?.theme); paintUnits(); // Rovers call their patrols رهط
       applyTheme(tr?.theme, { en: tr?.brand_en, ar: tr?.brand_ar }, tr && { en: tr.name_en, ar: tr.name_ar }); // the leader area wears the identity (and tab title) of the troop being worked on
     }
@@ -330,6 +359,7 @@
       // it used to show the wrong scout, and a role picked there could wipe that scout's roles and tags
       if (current !== id || troopAtStart !== troopLoad) return;
       [data, det] = r || [null, null];
+      if (data && det) data = { ...data, has_photo: det.has_photo, photo_hidden: det.photo_hidden }; // the public copy hides a hidden picture; here it is shown
       drawDetail();
       if (scrollNext && matchMedia('(max-width: 760px)').matches) $('right').scrollIntoView({ block: 'start', behavior: 'smooth' });
     }
@@ -445,7 +475,12 @@
         el('button', { class: 'btn ghost small', type: 'button', onclick: () => file.click() }, t('change_photo')),
         data.has_photo ? el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
           try { await api(`/api/scouts/${data.id}/photo`, 'DELETE'); await refresh(); } catch (e) { fail(e); }
-        } }, t('remove_photo')) : '', file);
+        } }, t('remove_photo')) : '',
+        // hide the picture on the dashboard only (it still shows in the leader area)
+        data.has_photo ? el('button', { class: 'btn ghost small', type: 'button', 'aria-pressed': String(!!data.photo_hidden), onclick: async () => {
+          try { await api(`/api/scouts/${data.id}/photo-hidden`, 'PUT', { hidden: !data.photo_hidden }); msg(t('saved'), true); await refresh(); } catch (e) { fail(e); }
+        } }, data.photo_hidden ? t('show_photo') : t('hide_photo')) : '',
+        data.has_photo && data.photo_hidden ? el('small', { class: 'hint', style: 'flex-basis:100%;margin:0' }, t('photo_hidden_note')) : '', file);
 
       // details (public name + private fields)
       const form = el('form', { class: 'panel', id: 'detailForm' },
@@ -480,7 +515,7 @@
       } }, isOff ? t('reactivate_scout') : t('deactivate_scout'));
 
       // promote: move the scout to another troop (not for leader accounts, which belong to their troop)
-      const others = troops.filter((x) => x.id !== activeTroop());
+      const others = troops.filter((x) => x.level > (troopById(activeTroop())?.level ?? Infinity)); // promotion only goes up: troops of a higher level
       const isAcct = !!(scouts.find((s) => s.id === data.id) || {}).is_leader;
       let promotePanel = '';
       if (others.length && !isAcct) {
@@ -501,7 +536,7 @@
       } }, t('delete_scout'));
       const offBanner = isOff ? el('p', { class: 'panel hint' }, t('inactive_note')) : '';
 
-      box.append(renderDetailHead(data, false), offBanner, isOff ? '' : awardForm, labelsPanel,
+      box.append(renderDetailHead(data, false), offBanner, isOff || !xpOn() ? '' : awardForm, labelsPanel,
         renderLog(data, async (xpId) => {
           if (!(await confirmBox(t('confirm_undo'), t('undo')))) return;
           try { await api('/api/xp/' + xpId, 'DELETE'); await refresh(); } catch (e) { fail(e); }
@@ -575,6 +610,8 @@
       try {
         meeting = null;
         const f = $('meetingForm').elements.date; if (!f.value) f.value = today(); f.max = today();
+        $('meetingXp').classList.toggle('hidden', !xpOn()); // the XP fields only where the troop uses XP
+        $('meetingForm').classList.toggle('hidden', isMod()); $('attHint').classList.toggle('hidden', isMod()); // a mod only opens meetings and marks attendance
         [meetings, attSummary] = await Promise.all([api('/api/meetings'), api('/api/attendance/summary')]);
         if (id) meeting = await api('/api/meetings/' + id);
       } catch (e) { fail(e); }
@@ -606,12 +643,12 @@
     }
     function drawSheet() {
       const m = meeting, box = $('attSheet');
-      const present = new Set(m.present_ids), absent = new Set(m.absent_ids || []);
+      const present = new Set(m.present_ids), absent = new Set(m.absent_ids || []), excused = new Set(m.excused_ids || []); // absent = no excuse
       const list = sheetScouts();
       const counter = el('b', {});
       const refreshCount = () => {
-        const nPresent = list.filter((s) => present.has(s.id)).length, nAbsent = list.filter((s) => absent.has(s.id)).length;
-        counter.textContent = countText(nPresent, list.length) + (nAbsent ? ' · ' + t('att_absent_count').replace('{n}', fmt(nAbsent)) : '');
+        const nPresent = list.filter((s) => present.has(s.id)).length, nAbsent = list.filter((s) => absent.has(s.id)).length, nExcused = list.filter((s) => excused.has(s.id)).length;
+        counter.textContent = countText(nPresent, list.length) + (nAbsent ? ' · ' + t('att_absent_count').replace('{n}', fmt(nAbsent)) : '') + (nExcused ? ' · ' + t('att_excused_count').replace('{n}', fmt(nExcused)) : '');
       };
       const dateIn = el('input', { type: 'date', value: m.meeting_date, required: '', max: today(), 'aria-label': t('att_date') });
       const titleIn = el('input', { type: 'text', maxlength: '80', value: m.title || '', required: '', 'aria-label': t('att_title'), placeholder: t('att_title') });
@@ -621,41 +658,43 @@
       // scout id -> repaint functions of its buttons: an account that also has a regular patrol is listed twice (leaders' patrol + its own), and both copies stay in step
       const buttons = new Map();
       const sync = () => buttons.forEach((ps) => ps.forEach((paint) => paint()));
-      const save = () => { m.present_ids = [...present]; m.absent_ids = [...absent]; sync(); refreshCount(); loadScouts().catch(() => {}); }; // XP totals changed
+      const save = () => { m.present_ids = [...present]; m.absent_ids = [...absent]; m.excused_ids = [...excused]; sync(); refreshCount(); loadScouts().catch(() => {}); }; // XP totals changed
       // what the change did to the scout's XP: the old mark's XP is taken back, the new mark's is given
-      const xpWorth = (st) => (st === 'present' ? m.xp : st === 'absent' ? -(m.absent_xp || 0) : 0);
-      const stateOf = (id) => (present.has(id) ? 'present' : absent.has(id) ? 'absent' : 'none');
+      const xpWorth = (st) => (st === 'present' ? m.xp : st === 'absent' ? -(m.absent_xp || 0) : 0); // an excused absence is worth nothing
+      const stateOf = (id) => (present.has(id) ? 'present' : absent.has(id) ? 'absent' : excused.has(id) ? 'excused' : 'none');
       const setAll = async (status) => {
         try { await api(`/api/meetings/${m.id}/attendance`, 'PUT', { status }); } catch (e) { return fail(e); }
         list.forEach((s) => {
-          if (status === 'none') { present.delete(s.id); absent.delete(s.id); }
-          else if (status === 'present') { present.add(s.id); absent.delete(s.id); }
-          else if (!present.has(s.id)) absent.add(s.id);
+          if (status === 'none') { present.delete(s.id); absent.delete(s.id); excused.delete(s.id); }
+          else if (status === 'present') { present.add(s.id); absent.delete(s.id); excused.delete(s.id); }
+          else if (!present.has(s.id) && !excused.has(s.id)) absent.add(s.id); // the rest: absent without an excuse (excused ones stay)
         });
         save(); msg(t('saved'), true);
       };
       // two buttons per scout: Present (filled when on) and Absent (filled red when on); pressing the one that is on clears the mark
       const row = (s) => {
-        const pb = el('button', { type: 'button', class: 'btn small att-btn' }), ab = el('button', { type: 'button', class: 'btn small att-btn att-absent' });
+        const pb = el('button', { type: 'button', class: 'btn small att-btn' }), ab = el('button', { type: 'button', class: 'btn small att-btn att-absent' }), eb = el('button', { type: 'button', class: 'btn small att-btn att-excused' });
         const paint = () => {
           const st = stateOf(s.id);
           pb.textContent = st === 'present' ? '✓ ' + t('att_present') : t('att_mark');
           pb.classList.toggle('ghost', st !== 'present'); pb.setAttribute('aria-pressed', String(st === 'present'));
           ab.textContent = st === 'absent' ? '✓ ' + t('att_absent') : t('att_mark_absent');
           ab.classList.toggle('ghost', st !== 'absent'); ab.setAttribute('aria-pressed', String(st === 'absent'));
+          eb.textContent = st === 'excused' ? '✓ ' + t('att_excused') : t('att_mark_excused');
+          eb.classList.toggle('ghost', st !== 'excused'); eb.setAttribute('aria-pressed', String(st === 'excused'));
         };
         paint(); buttons.set(s.id, [...(buttons.get(s.id) || []), paint]);
         const press = (want) => async () => {
           const before = stateOf(s.id), status = before === want ? 'none' : want;
-          pb.disabled = ab.disabled = true;
-          try { await api(`/api/meetings/${m.id}/attendance/${s.id}`, 'PUT', { status }); } catch (e) { pb.disabled = ab.disabled = false; return fail(e); }
-          pb.disabled = ab.disabled = false;
-          present.delete(s.id); absent.delete(s.id); if (status === 'present') present.add(s.id); if (status === 'absent') absent.add(s.id);
+          pb.disabled = ab.disabled = eb.disabled = true;
+          try { await api(`/api/meetings/${m.id}/attendance/${s.id}`, 'PUT', { status }); } catch (e) { pb.disabled = ab.disabled = eb.disabled = false; return fail(e); }
+          pb.disabled = ab.disabled = eb.disabled = false;
+          present.delete(s.id); absent.delete(s.id); excused.delete(s.id); if (status === 'present') present.add(s.id); if (status === 'absent') absent.add(s.id); if (status === 'excused') excused.add(s.id);
           const delta = xpWorth(status) - xpWorth(before);
           save(); msg(delta ? t('att_xp_change').replace('{xp}', signed(delta)) : t('saved'), true);
         };
-        pb.addEventListener('click', press('present')); ab.addEventListener('click', press('absent'));
-        return el('li', {}, el('span', { class: 'grow', dir: 'auto' }, s.name), el('span', { class: 'att-btns' }, pb, ab));
+        pb.addEventListener('click', press('present')); ab.addEventListener('click', press('absent')); eb.addEventListener('click', press('excused'));
+        return el('li', {}, el('span', { class: 'grow', dir: 'auto' }, s.name), el('span', { class: 'att-btns' }, pb, ab, eb));
       };
       // grouped like the scout lists: each patrol under its own heading (the leaders' patrol first), scouts without one last
       const groups = patrols.map((p) => [patrolName(p), list.filter((s) => s.patrol_id === p.id || (p.is_leadership && s.in_council))])
@@ -664,11 +703,13 @@
       box.replaceChildren(
         el('div', { class: 'row' }, el('button', { class: 'btn small', type: 'button', onclick: () => openAttendance() }, t('att_back')), el('span', { class: 'grow' }), counter),
         el('h2', {}, meetingLabel(m), ' ', el('span', { class: 'chip' }, t('att_kind_' + m.kind))),
-        el('p', { class: 'hint' }, m.xp ? t('att_xp_hint').replace('{xp}', fmt(m.xp)) : t('att_xp_none')),
-        m.absent_xp ? el('p', { class: 'hint' }, t('att_absent_hint').replace('{xp}', fmt(m.absent_xp))) : '',
+        !xpOn() ? '' : el('p', { class: 'hint' }, m.xp ? t('att_xp_hint').replace('{xp}', fmt(m.xp)) : t('att_xp_none')),
+        xpOn() && m.absent_xp ? el('p', { class: 'hint' }, t('att_absent_hint').replace('{xp}', fmt(m.absent_xp))) : '',
+        // a mod only marks attendance: the date, title, type and XP are changed by the others
+        ...(isMod() ? [] : [
         el('div', { class: 'grid2' }, el('label', {}, el('span', {}, t('att_date')), dateIn), el('label', {}, el('span', {}, t('att_title')), titleIn)),
-        el('div', { class: 'grid2' }, el('label', {}, el('span', {}, t('att_type')), kindIn), el('label', {}, el('span', {}, t('att_xp')), xpIn)),
-        el('label', {}, el('span', {}, t('att_absent_xp')), absentXpIn),
+        xpOn() ? el('div', { class: 'grid2' }, el('label', {}, el('span', {}, t('att_type')), kindIn), el('label', {}, el('span', {}, t('att_xp')), xpIn)) : el('label', {}, el('span', {}, t('att_type')), kindIn),
+        xpOn() ? el('label', {}, el('span', {}, t('att_absent_xp')), absentXpIn) : '',
         el('div', { class: 'row' },
           el('button', { class: 'btn small', type: 'button', onclick: async () => {
             if (!titleIn.reportValidity() || !xpIn.reportValidity() || !absentXpIn.reportValidity() || !dateIn.reportValidity()) return; // a title is required
@@ -681,7 +722,7 @@
           myRole !== 'mod' ? el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
             if (!(await confirmBox(t('confirm_delete_meeting')))) return;
             try { await api('/api/meetings/' + m.id, 'DELETE'); msg(''); await openAttendance(); } catch (e) { fail(e); }
-          } }, t('delete')) : ''),
+          } }, t('delete')) : '')]),
         el('div', { class: 'row', style: 'margin:.75rem 0' },
           el('button', { class: 'btn small', type: 'button', onclick: () => setAll('present') }, t('att_all')),
           el('button', { class: 'btn ghost small', type: 'button', onclick: () => setAll('absent') }, t('att_rest_absent')),
@@ -714,10 +755,11 @@
         case 'attendance_undo': return `${verb} ${m.name} — ${m.title} (${signed(-m.xp)} ${t('xp')})`;
         case 'attendance_bulk': return `${verb} ${m.title}: ${fmt(m.count)} (${signed(m.xp)} ${t('xp')})`;
         case 'absence': return `${m.name} ${verb} ${m.title} (${signed(m.xp)} ${t('xp')})`;
+        case 'absence_excused': return `${m.name} ${verb} ${m.title}`;
         case 'absence_undo': return `${verb} ${m.name} — ${m.title} (${signed(-m.xp)} ${t('xp')})`;
         case 'absence_bulk': case 'absence_bulk_undo': return `${verb} ${m.title}: ${fmt(m.count)} (${signed(m.xp)} ${t('xp')})`;
         case 'attendance_bulk_undo': return `${verb} ${m.title}: ${fmt(m.count)} (${signed(-m.xp)} ${t('xp')})`;
-        case 'depot_book': case 'depot_unbook': return `${verb} ${(m.items || []).map((x) => `${ar ? x.name_ar : x.name_en} × ${fmt(x.quantity)}`).join(ar ? '، ' : ', ')}`;
+        case 'depot_book': case 'depot_unbook': case 'depot_take': case 'depot_return': return `${verb} ${(m.items || []).map((x) => `${ar ? x.name_ar : x.name_en} × ${fmt(x.quantity)}`).join(ar ? '، ' : ', ')}`;
         case 'login': case 'logout': case 'password_change': return verb;
         default: return `${verb} ${m.name || ''}`;
       }
@@ -770,15 +812,17 @@
           el('input', { name: 'name_ar', type: 'text', maxlength: '60', value: tr.name_ar, dir: 'rtl', 'aria-label': t('name_ar') }),
           el('input', { name: 'brand_en', type: 'text', maxlength: '40', value: tr.brand_en || '', dir: 'ltr', placeholder: t('brand_en'), 'aria-label': t('brand_en') }),
           el('input', { name: 'brand_ar', type: 'text', maxlength: '40', value: tr.brand_ar || '', dir: 'rtl', placeholder: t('brand_ar'), 'aria-label': t('brand_ar') }),
+          el('input', { name: 'level', type: 'number', min: '1', max: '1000', step: '1', value: String(tr.level), required: '', style: 'max-width:6rem', title: t('troop_level'), 'aria-label': t('troop_level') }),
+          el('label', { class: 'check' }, el('input', { name: 'xp_enabled', type: 'checkbox', ...(tr.xp_enabled !== false ? { checked: '' } : {}) }), ' ', t('troop_xp')),
           themeSelect(tr.theme),
           el('button', { class: 'btn small', type: 'submit' }, t('save')));
         editRow.addEventListener('submit', async (ev) => {
           ev.preventDefault();
           const f = new FormData(editRow);
-          try { await api('/api/troops/' + tr.id, 'PUT', { name_en: f.get('name_en'), name_ar: f.get('name_ar'), brand_en: f.get('brand_en'), brand_ar: f.get('brand_ar'), theme: f.get('theme') }); await loadTroops(); if (tr.id === activeTroop()) chooseTroop(tr.id); msg(t('saved'), true); } catch (e) { fail(e); }
+          try { await api('/api/troops/' + tr.id, 'PUT', { name_en: f.get('name_en'), name_ar: f.get('name_ar'), brand_en: f.get('brand_en'), brand_ar: f.get('brand_ar'), theme: f.get('theme'), level: f.get('level'), xp_enabled: f.get('xp_enabled') === 'on' }); await loadTroops(); if (tr.id === activeTroop()) chooseTroop(tr.id); msg(t('saved'), true); } catch (e) { fail(e); }
         });
         return el('li', { class: 'acct' },
-          el('span', { class: 'grow' }, troopName(tr), tr.id === activeTroop() && troops.length > 1 ? ` · ${t('working_here')}` : ''),
+          el('span', { class: 'grow' }, troopName(tr), ` · ${t('troop_level')} ${fmt(tr.level)}`, tr.xp_enabled === false ? ` · ${t('troop_xp_off')}` : '', tr.id === activeTroop() && troops.length > 1 ? ` · ${t('working_here')}` : ''),
           el('button', { class: 'btn ghost small', type: 'button', onclick: () => { editRow.classList.toggle('hidden'); editRow.querySelector('input').focus(); } }, t('edit')),
           el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
             if (!(await confirmBox(t('confirm_delete_troop')))) return;
@@ -790,7 +834,7 @@
     $('troopForm').addEventListener('submit', async (ev) => {
       ev.preventDefault();
       const f = new FormData(ev.target);
-      try { await api('/api/troops', 'POST', { name_en: f.get('name_en'), name_ar: f.get('name_ar'), brand_en: f.get('brand_en'), brand_ar: f.get('brand_ar'), theme: f.get('theme'), copy_from: Number(f.get('copy_from')) || undefined }); ev.target.reset(); msg(t('saved'), true); await loadTroops(); }
+      try { await api('/api/troops', 'POST', { name_en: f.get('name_en'), name_ar: f.get('name_ar'), brand_en: f.get('brand_en'), brand_ar: f.get('brand_ar'), theme: f.get('theme'), level: f.get('level'), xp_enabled: f.get('xp_enabled') === 'on', copy_from: Number(f.get('copy_from')) || undefined }); ev.target.reset(); msg(t('saved'), true); await loadTroops(); }
       catch (e) { fail(e); }
     });
 

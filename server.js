@@ -67,7 +67,7 @@ const THEME_KEYS = ['default', 'rovers', 'forest', 'forest_girls', 'ocean', 'yel
 let troopCache = null, troopCacheAt = 0;
 const troopList = async () => {
   if (!troopCache || Date.now() - troopCacheAt > 60000) {
-    troopCache = (await pool.query("SELECT id, name_en, name_ar, COALESCE(theme, 'default') AS theme, brand_en, brand_ar FROM troops ORDER BY id")).rows;
+    troopCache = (await pool.query("SELECT id, name_en, name_ar, COALESCE(theme, 'default') AS theme, brand_en, brand_ar, COALESCE(level, id) AS level, xp_enabled FROM troops ORDER BY COALESCE(level, id), id")).rows;
     troopCacheAt = Date.now();
   }
   return troopCache;
@@ -78,6 +78,11 @@ const troopLook = async (troopId) => {
   const r = (await troopList()).find((x) => x.id === troopId) || {};
   return { theme: r.theme || 'default', brand_en: r.brand_en || null, brand_ar: r.brand_ar || null };
 };
+// troop level: a whole number 1-1000 (empty = none given)
+const levelOf = (b) => { const v = b?.level; if (v == null || v === '') return null; const n = Number(v); if (!Number.isInteger(n) || n < 1 || n > 1000) throw invalid(); return n; };
+// does this troop use the XP system? (the Troops tab switches it per troop)
+const xpOn = async (troopId) => (await troopList()).find((x) => x.id === troopId)?.xp_enabled !== false;
+const xpFlag = (b) => (typeof b?.xp_enabled === 'boolean' ? b.xp_enabled : null); // null: not given
 const brandOf = (b) => [text(b?.brand_en, 40), text(b?.brand_ar, 40)];
 const themeOf = (b) => { const k = b?.theme ?? 'default'; if (!THEME_KEYS.includes(k)) throw invalid(); return k; };
 
@@ -240,7 +245,8 @@ app.post('/api/troops', requireLeader, requireSuper, wrap(async (req, res) => {
   const [bEn, bAr] = brandOf(req.body);
   const copyFrom = req.body?.copy_from ? intId(req.body.copy_from) : null; // optionally start with a copy of another troop's activities and roles/tags
   const row = await tx(async (c) => {
-    const { rows } = await c.query('INSERT INTO troops (name_en, name_ar, theme, brand_en, brand_ar) VALUES ($1,$2,$3,$4,$5) RETURNING id, name_en, name_ar, theme, brand_en, brand_ar', [en, ar, themeOf(req.body), bEn, bAr]);
+    // no level given: above every existing troop
+    const { rows } = await c.query('INSERT INTO troops (name_en, name_ar, theme, brand_en, brand_ar, level, xp_enabled) VALUES ($1,$2,$3,$4,$5, COALESCE($6::int, (SELECT COALESCE(MAX(level), 0) + 1 FROM troops)), $7) RETURNING id, name_en, name_ar, theme, brand_en, brand_ar, level, xp_enabled', [en, ar, themeOf(req.body), bEn, bAr, levelOf(req.body), xpFlag(req.body) ?? true]);
     if (copyFrom) {
       await c.query('INSERT INTO activities (name_en, name_ar, xp, troop_id) SELECT name_en, name_ar, xp, $1 FROM activities WHERE troop_id = $2 ORDER BY id', [rows[0].id, copyFrom]);
       await c.query('INSERT INTO labels (kind, name_en, name_ar, color, priority, troop_id) SELECT kind, name_en, name_ar, color, priority, $1 FROM labels WHERE troop_id = $2 ORDER BY id', [rows[0].id, copyFrom]);
@@ -255,7 +261,7 @@ app.post('/api/troops', requireLeader, requireSuper, wrap(async (req, res) => {
 app.put('/api/troops/:id', requireLeader, requireSuper, wrap(async (req, res) => {
   const [en, ar] = troopNames(req.body);
   const [bEn, bAr] = brandOf(req.body);
-  const r = await pool.query('UPDATE troops SET name_en = $1, name_ar = $2, theme = $3, brand_en = $4, brand_ar = $5 WHERE id = $6', [en, ar, themeOf(req.body), bEn, bAr, intId(req.params.id)]);
+  const r = await pool.query('UPDATE troops SET name_en = $1, name_ar = $2, theme = $3, brand_en = $4, brand_ar = $5, level = COALESCE($7::int, level), xp_enabled = COALESCE($8::boolean, xp_enabled) WHERE id = $6', [en, ar, themeOf(req.body), bEn, bAr, intId(req.params.id), levelOf(req.body), xpFlag(req.body)]);
   if (!r.rowCount) return bad(res, 'not_found', 404);
   dropTroopCache();
   audit(req.leader, 'troop_update', { name: en }, intId(req.params.id));
@@ -281,10 +287,10 @@ app.get('/api/scouts', wrap(async (req, res) => {
   let troop = parseInt(req.query.troop, 10);
   if (!Number.isInteger(troop)) troop = await firstTroopId();
   const { rows } = await pool.query(
-    `SELECT s.id, s.name, s.patrol_id, s.photo_v, (s.photo IS NOT NULL) AS has_photo, COALESCE((SELECT SUM(xp) FROM xp_log x WHERE x.scout_id = s.id), 0)::int AS total_xp, EXISTS (SELECT 1 FROM leaders l WHERE l.scout_id = s.id AND l.role <> 'super_admin') AS in_council, ${ROLES_JSON}
+    `SELECT s.id, s.name, s.patrol_id, s.photo_v, (s.photo IS NOT NULL AND NOT s.photo_hidden) AS has_photo, COALESCE((SELECT SUM(xp) FROM xp_log x WHERE x.scout_id = s.id), 0)::int AS total_xp, EXISTS (SELECT 1 FROM leaders l WHERE l.scout_id = s.id AND l.role <> 'super_admin') AS in_council, ${ROLES_JSON}
      FROM scouts s
      WHERE s.troop_id = $1 AND s.active
-     ORDER BY (SELECT COALESCE(MAX(l.priority), 0) FROM scout_labels sl JOIN labels l ON l.id = sl.label_id AND l.kind = 'role' WHERE sl.scout_id = s.id) DESC, total_xp DESC, s.name`,
+     ORDER BY (SELECT COALESCE(MAX(l.priority), 0) FROM scout_labels sl JOIN labels l ON l.id = sl.label_id AND l.kind = 'role' WHERE sl.scout_id = s.id) DESC, (CASE WHEN COALESCE((SELECT t.xp_enabled FROM troops t WHERE t.id = s.troop_id), true) THEN COALESCE((SELECT SUM(xp) FROM xp_log x WHERE x.scout_id = s.id), 0) ELSE 0 END) DESC, s.name`,
     [troop]);
   res.json(rows);
 }));
@@ -292,7 +298,7 @@ app.get('/api/scouts', wrap(async (req, res) => {
 app.get('/api/scouts/:id', wrap(async (req, res) => {
   const id = intId(req.params.id);
   const [s, log] = await Promise.all([
-    pool.query(`SELECT s.id, s.name, s.troop_id, s.active, s.photo_v, (s.photo IS NOT NULL) AS has_photo, ${ROLES_JSON} FROM scouts s WHERE s.id = $1`, [id]),
+    pool.query(`SELECT s.id, s.name, s.troop_id, s.active, s.photo_v, (s.photo IS NOT NULL AND NOT s.photo_hidden) AS has_photo, ${ROLES_JSON} FROM scouts s WHERE s.id = $1`, [id]),
     pool.query(
       `SELECT id, activity, activity_ar, xp, note, created_at, COALESCE(activity_date, created_at::date)::text AS day
        FROM xp_log WHERE scout_id = $1 ORDER BY COALESCE(activity_date, created_at::date) DESC, created_at DESC, id DESC`, [id]),
@@ -303,8 +309,9 @@ app.get('/api/scouts/:id', wrap(async (req, res) => {
 }));
 
 app.get('/api/scouts/:id/photo', wrap(async (req, res) => {
-  const { rows } = await pool.query('SELECT photo, active FROM scouts WHERE id = $1', [intId(req.params.id)]);
+  const { rows } = await pool.query('SELECT photo, active, photo_hidden FROM scouts WHERE id = $1', [intId(req.params.id)]);
   if (!rows[0] || !rows[0].photo) return res.sendStatus(404);
+  if (rows[0].photo_hidden && !(await isStaff(req))) return res.sendStatus(404); // hidden on the dashboard: only signed-in accounts (the leader area) get it
   if (!rows[0].active && !(await isStaff(req))) return res.sendStatus(404); // like the rest of a deactivated scout's page: leaders only
   res.set('Content-Type', 'image/jpeg').set('Cache-Control', 'public, max-age=31536000, immutable').send(rows[0].photo);
 }));
@@ -313,7 +320,7 @@ app.get('/api/scouts/:id/photo', wrap(async (req, res) => {
 // searchable list for leaders: includes private search fields, leader flag and role/tag ids
 app.get('/api/leader/scouts', requireLeader, wrap(async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT s.id, s.name, s.troop_id, s.patrol_id, s.active, s.photo_v, (s.photo IS NOT NULL) AS has_photo, s.full_name, s.phone,
+    `SELECT s.id, s.name, s.troop_id, s.patrol_id, s.active, s.photo_v, (s.photo IS NOT NULL) AS has_photo, s.photo_hidden, s.full_name, s.phone,
        COALESCE((SELECT SUM(xp) FROM xp_log x WHERE x.scout_id = s.id), 0)::int AS total_xp,
        EXISTS (SELECT 1 FROM leaders l WHERE l.scout_id = s.id) AS is_leader,
        EXISTS (SELECT 1 FROM leaders l WHERE l.scout_id = s.id AND l.role = 'super_admin') AS is_super,
@@ -321,7 +328,7 @@ app.get('/api/leader/scouts', requireLeader, wrap(async (req, res) => {
        COALESCE((SELECT json_agg(sl.label_id) FROM scout_labels sl WHERE sl.scout_id = s.id), '[]'::json) AS label_ids
      FROM scouts s
      WHERE s.troop_id = $1
-     ORDER BY (SELECT COALESCE(MAX(l.priority), 0) FROM scout_labels sl JOIN labels l ON l.id = sl.label_id AND l.kind = 'role' WHERE sl.scout_id = s.id) DESC, total_xp DESC, s.name`,
+     ORDER BY (SELECT COALESCE(MAX(l.priority), 0) FROM scout_labels sl JOIN labels l ON l.id = sl.label_id AND l.kind = 'role' WHERE sl.scout_id = s.id) DESC, (CASE WHEN COALESCE((SELECT t.xp_enabled FROM troops t WHERE t.id = s.troop_id), true) THEN COALESCE((SELECT SUM(xp) FROM xp_log x WHERE x.scout_id = s.id), 0) ELSE 0 END) DESC, s.name`,
     [req.troop]);
   res.json(rows);
 }));
@@ -458,8 +465,9 @@ const hexColor = (v) => {
 const DETAIL_COLS = 'id, name, full_name, phone, join_date, address, birth_date, guardian_name, guardian_phone, medical_notes, notes';
 
 app.get('/api/leader/scouts/:id', requireLeader, wrap(async (req, res) => {
-  const { rows } = await pool.query(`SELECT ${DETAIL_COLS}, troop_id FROM scouts WHERE id = $1`, [intId(req.params.id)]);
-  if (!rows[0]) return bad(res, 'not_found', 404); // read-only, so every signed-in account may read any troop's scout (editing is still limited to the account's own troop(s))
+  const { rows } = await pool.query(`SELECT ${DETAIL_COLS}, troop_id, (photo IS NOT NULL) AS has_photo, photo_hidden FROM scouts WHERE id = $1`, [intId(req.params.id)]);
+  // admins and mods only get their own troop's scouts; the super admin and leaders (who work in every troop) get any
+  if (!rows[0] || (!roams(req.leader) && rows[0].troop_id !== req.leader.troop_id)) return bad(res, 'not_found', 404);
   // tags are leader-only: they come with the private details
   const tags = (await pool.query("SELECT lb.id, lb.name_en, lb.name_ar, lb.color FROM scout_labels sl JOIN labels lb ON lb.id = sl.label_id AND lb.kind = 'tag' WHERE sl.scout_id = $1 ORDER BY lb.name_en, lb.id", [rows[0].id])).rows;
   res.json({ ...rows[0], tags });
@@ -523,8 +531,9 @@ app.put('/api/scouts/:id/promote', requireLeader, wrap(async (req, res) => {
   const sc = await scoutFor(req, id);
   if (!sc) return bad(res, 'not_found', 404);
   if (to === sc.troop_id) throw invalid();
-  const target = (await pool.query('SELECT name_en FROM troops WHERE id = $1', [to])).rows[0];
+  const all = await troopList(), target = all.find((x) => x.id === to), from = all.find((x) => x.id === sc.troop_id);
   if (!target) return bad(res, 'not_found', 404);
+  if (!from || target.level <= from.level) return bad(res, 'not_higher', 400); // promotion only goes up: to a troop with a higher level
   if ((await pool.query('SELECT 1 FROM leaders WHERE scout_id = $1', [id])).rows[0]) return bad(res, 'scout_is_leader', 409); // accounts belong to their troop
   await tx(async (c) => {
     await c.query('DELETE FROM scout_labels WHERE scout_id = $1', [id]);
@@ -545,6 +554,17 @@ app.put('/api/scouts/:id/photo', requireLeader, wrap(async (req, res) => {
   if (!sc) return bad(res, 'not_found', 404);
   await pool.query('UPDATE scouts SET photo = $1, photo_v = photo_v + 1 WHERE id = $2', [buf, id]);
   audit(req.leader, 'photo_set', { name: sc.name }, sc.troop_id);
+  res.json({ ok: true });
+}));
+
+// hide / show the picture on the public dashboard (it is kept, and the leader area still shows it)
+app.put('/api/scouts/:id/photo-hidden', requireLeader, wrap(async (req, res) => {
+  const id = intId(req.params.id);
+  if (typeof req.body?.hidden !== 'boolean') throw invalid();
+  const sc = await scoutFor(req, id);
+  if (!sc) return bad(res, 'not_found', 404);
+  await pool.query('UPDATE scouts SET photo_hidden = $1 WHERE id = $2', [req.body.hidden, id]);
+  audit(req.leader, req.body.hidden ? 'photo_hide' : 'photo_show', { name: sc.name }, sc.troop_id);
   res.json({ ok: true });
 }));
 
@@ -573,6 +593,7 @@ app.post('/api/scouts/:id/xp', requireLeader, wrap(async (req, res) => {
   const activityId = custom ? null : intId(req.body?.activity_id);
   const sc = await scoutFor(req, id);
   if (!sc) return bad(res, 'not_found', 404);
+  if (!(await xpOn(sc.troop_id))) return bad(res, 'xp_disabled', 409); // this troop doesn't use XP
   if (!(await pool.query('SELECT active FROM scouts WHERE id = $1', [id])).rows[0].active) return bad(res, 'scout_inactive', 409); // reactivate first
   const a = custom ? { rows: [customAct] } : await pool.query('SELECT * FROM activities WHERE id = $1 AND troop_id = $2', [activityId, sc.troop_id]); // each troop only uses its own activities
   if (!a.rows[0]) return bad(res, 'not_found', 404);
@@ -686,7 +707,7 @@ app.get('/api/audit', requireLeader, requireSuper, wrap(async (req, res) => {
   res.json(rows);
 }));
 
-// ---- depot (مستودع): the inventory. Everyone can read and search it; admins and the super admin edit and remove items, only the super admin adds them ----
+// ---- depot (مستودع): the inventory. Everyone can read and search it; admins, leaders and the super admin edit and remove items, only the super admin adds them ----
 const depotBody = (b) => {
   const en = text(b?.name_en, 80), ar = text(b?.name_ar, 80);
   const quantity = Number(b?.quantity);
@@ -712,18 +733,17 @@ app.put('/api/depot/:id', requireLeader, requireAdmin, wrap(async (req, res) => 
 app.delete('/api/depot/:id', requireLeader, requireAdmin, wrap(async (req, res) => {
   const { rows } = await pool.query('DELETE FROM depot_items WHERE id = $1 RETURNING name_en', [intId(req.params.id)]);
   // the item leaves every booking with it; a booking that held nothing else is removed too
-  if (rows[0]) await pool.query('DELETE FROM depot_bookings b WHERE NOT EXISTS (SELECT 1 FROM depot_booking_items bi WHERE bi.booking_id = b.id)');
+  if (rows[0]) await pool.query('DELETE FROM depot_takes b WHERE NOT EXISTS (SELECT 1 FROM depot_take_items bi WHERE bi.take_id = b.id)');
   if (rows[0]) audit(req.leader, 'depot_delete', { name: rows[0].name_en }, null);
   res.json({ ok: true });
 }));
 
-// ---- depot reservations (bookings): made for a troop. A booking is a basket of items, each with a quantity, for one time window,
-// accepted only if every item has that much free for the whole window. Admins and mods book for their own troop; the super admin
-// and leaders pick the troop. Leaders only (they show who booked). ----
+// ---- depot: taking items out and putting them back. A take is a basket of items (each with a quantity) taken at once for a troop, at the moment
+// it is made (now), and counted against the stock until it is put back. It is accepted only if every item has that much available right now.
+// Admins and mods take for their own troop; the super admin and leaders pick the troop. Leaders only (they show who took what). ----
 const when = (v) => { const d = new Date(String(v ?? '')); if (!v || isNaN(d)) throw invalid(); return d.toISOString(); };
-// leader_name in the list is the display name on the booker's scout profile (the username stored with the booking if the account is gone)
-// who may cancel a booking: the one who made it, the admins of its troop, and the super admin and leaders (who work in every troop)
-const canCancel = (l, b) => b.leader_id === l.id || roams(l) || (l.role === 'admin' && b.troop_id === l.troop_id);
+// who may put a take back: the one who made it, the admins of its troop, and the super admin and leaders (who work in every troop)
+const canReturn = (l, b) => b.leader_id === l.id || roams(l) || (l.role === 'admin' && b.troop_id === l.troop_id);
 // the basket: [{ item_id, quantity }], the same item twice is added up; 1-100 different items
 const basketOf = (v) => {
   if (!Array.isArray(v) || !v.length || v.length > 100) throw invalid();
@@ -735,59 +755,62 @@ const basketOf = (v) => {
   }
   return m;
 };
-// the item names of a booking for the activity log (both languages, so the log follows the reader's language)
+// the item names of a take for the activity log (both languages, so the log follows the reader's language)
 const logItems = (lines) => lines.map((x) => ({ name_en: x.name_en, name_ar: x.name_ar, quantity: x.quantity }));
-// ?past=1: the history instead (bookings that are over, latest first, up to 200); nothing in it can be cancelled
-app.get('/api/depot/bookings', requireLeader, wrap(async (req, res) => {
-  const past = req.query.past === '1';
+// ?returned=1: the history instead (what was put back, latest first, up to 200); nothing in it can be put back again.
+// The booker's name is the display name on their scout profile (the username stored with the take if the account is gone).
+app.get('/api/depot/takes', requireLeader, wrap(async (req, res) => {
+  const hist = req.query.returned === '1';
   const { rows } = await pool.query(
-    `SELECT b.id, b.troop_id, b.starts_at, b.ends_at, b.note, b.leader_id, COALESCE(sc.name, b.leader_name) AS leader_name,
+    `SELECT b.id, b.troop_id, b.taken_at, b.returned_at, b.note, b.leader_id, COALESCE(sc.name, b.leader_name) AS leader_name,
             t.name_en AS troop_name_en, t.name_ar AS troop_name_ar,
             COALESCE(json_agg(json_build_object('item_id', bi.item_id, 'quantity', bi.quantity) ORDER BY bi.item_id) FILTER (WHERE bi.item_id IS NOT NULL), '[]') AS items
-     FROM depot_bookings b LEFT JOIN troops t ON t.id = b.troop_id LEFT JOIN depot_booking_items bi ON bi.booking_id = b.id
+     FROM depot_takes b LEFT JOIN troops t ON t.id = b.troop_id LEFT JOIN depot_take_items bi ON bi.take_id = b.id
      LEFT JOIN leaders ld ON ld.id = b.leader_id LEFT JOIN scouts sc ON sc.id = ld.scout_id
-     WHERE b.ends_at ${past ? '<=' : '>'} now() GROUP BY b.id, t.id, sc.id ORDER BY ${past ? 'b.ends_at DESC, b.id DESC LIMIT 200' : 'b.starts_at, b.id LIMIT 500'}`);
-  res.json(rows.map(({ leader_id, ...b }) => ({ ...b, mine: leader_id === req.leader.id, can_cancel: !past && canCancel(req.leader, { ...b, leader_id }) })));
+     WHERE b.returned_at IS ${hist ? 'NOT NULL' : 'NULL'} GROUP BY b.id, t.id, sc.id ORDER BY ${hist ? 'b.returned_at DESC, b.id DESC LIMIT 200' : 'b.taken_at DESC, b.id DESC LIMIT 500'}`);
+  res.json(rows.map(({ leader_id, ...b }) => ({ ...b, mine: leader_id === req.leader.id, can_return: !hist && canReturn(req.leader, { ...b, leader_id }) })));
 }));
-app.post('/api/depot/bookings', requireLeader, wrap(async (req, res) => {
+app.post('/api/depot/takes', requireLeader, wrap(async (req, res) => {
   const basket = basketOf(req.body?.items), ids = [...basket.keys()].sort((a, b) => a - b);
-  const start = when(req.body?.starts_at), end = when(req.body?.ends_at);
-  const s = Date.parse(start), e = Date.parse(end);
-  if (e <= s || e <= Date.now() || e - s > 60 * 86400000) throw invalid(); // ends after it starts, not over yet, at most 60 days
+  // when: now unless the page sends the time the account edited it to (not in the future, at most 60 days back)
+  const takenAt = req.body?.taken_at ? when(req.body.taken_at) : new Date().toISOString();
+  const tm = Date.parse(takenAt);
+  if (tm > Date.now() + 5 * 60000 || tm < Date.now() - 60 * 86400000) throw invalid();
   const note = text(req.body?.note, 200);
-  // the troop it is for: an admin's or mod's own troop; the super admin names one (or works in the troop picked with X-Troop)
+  // the troop it is for: an admin's or mod's own troop; the super admin and leaders name one (default: the troop they are working in)
   let troop = req.leader.troop_id;
-  if (roams(req.leader)) { // the super admin has no troop, leaders may book for any: they name one (default: the troop they are working in)
+  if (roams(req.leader)) {
     troop = req.body?.troop_id == null || req.body.troop_id === '' ? req.troop : intId(req.body.troop_id);
     if (!(await troopList()).some((x) => x.id === troop)) throw invalid();
   }
   const out = await tx(async (c) => {
-    // the item rows are locked (always in id order, so two baskets can't deadlock) so two bookings at the same moment can't both take the last ones
+    // the item rows are locked (always in id order, so two baskets can't deadlock) so two takes at the same moment can't both take the last ones
     const items = (await c.query('SELECT id, name_en, name_ar, quantity FROM depot_items WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE', [ids])).rows;
     if (items.length !== ids.length) return { status: 404 };
-    // everything booked in an overlapping window counts against the stock (simple and never overbooks)
+    // what is out right now (not yet put back) counts against the stock
     const held = new Map((await c.query(
-      `SELECT bi.item_id, SUM(bi.quantity)::int AS n FROM depot_booking_items bi JOIN depot_bookings b ON b.id = bi.booking_id
-       WHERE bi.item_id = ANY($1::int[]) AND b.starts_at < $3 AND b.ends_at > $2 GROUP BY bi.item_id`, [ids, start, end])).rows.map((r) => [r.item_id, r.n]));
+      `SELECT bi.item_id, SUM(bi.quantity)::int AS n FROM depot_take_items bi JOIN depot_takes b ON b.id = bi.take_id
+       WHERE bi.item_id = ANY($1::int[]) AND b.returned_at IS NULL GROUP BY bi.item_id`, [ids])).rows.map((r) => [r.item_id, r.n]));
     const short = items.map((i) => ({ item_id: i.id, available: Math.max(0, i.quantity - (held.get(i.id) || 0)) })).filter((x) => basket.get(x.item_id) > x.available);
     if (short.length) return { status: 409, short };
-    const { rows } = await c.query('INSERT INTO depot_bookings (troop_id, starts_at, ends_at, note, leader_id, leader_name) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
-      [troop, start, end, note, req.leader.id, req.leader.username]);
-    await c.query('INSERT INTO depot_booking_items (booking_id, item_id, quantity) SELECT $1, unnest($2::int[]), unnest($3::int[])', [rows[0].id, ids, ids.map((id) => basket.get(id))]);
+    const { rows } = await c.query('INSERT INTO depot_takes (troop_id, taken_at, note, leader_id, leader_name) VALUES ($1,$2,$3,$4,$5) RETURNING id',
+      [troop, takenAt, note, req.leader.id, req.leader.username]);
+    await c.query('INSERT INTO depot_take_items (take_id, item_id, quantity) SELECT $1, unnest($2::int[]), unnest($3::int[])', [rows[0].id, ids, ids.map((id) => basket.get(id))]);
     return { row: rows[0], lines: items.map((i) => ({ ...i, quantity: basket.get(i.id) })) };
   });
   if (out.status === 404) return bad(res, 'not_found', 404);
   if (out.status === 409) return res.status(409).json({ error: 'not_available', short: out.short });
-  audit(req.leader, 'depot_book', { items: logItems(out.lines) }, troop);
+  audit(req.leader, 'depot_take', { items: logItems(out.lines) }, troop);
   res.status(201).json(out.row);
 }));
-app.delete('/api/depot/bookings/:id', requireLeader, wrap(async (req, res) => {
-  const b = (await pool.query('SELECT id, troop_id, leader_id FROM depot_bookings WHERE id = $1', [intId(req.params.id)])).rows[0];
-  if (!b) return res.json({ ok: true });
-  if (!canCancel(req.leader, b)) return bad(res, 'forbidden', 403);
-  const lines = (await pool.query('SELECT d.name_en, d.name_ar, bi.quantity FROM depot_booking_items bi JOIN depot_items d ON d.id = bi.item_id WHERE bi.booking_id = $1 ORDER BY d.id', [b.id])).rows;
-  await pool.query('DELETE FROM depot_bookings WHERE id = $1', [b.id]);
-  audit(req.leader, 'depot_unbook', { items: logItems(lines) }, b.troop_id);
+// put back everything in a take
+app.put('/api/depot/takes/:id/return', requireLeader, wrap(async (req, res) => {
+  const b = (await pool.query('SELECT id, troop_id, leader_id, returned_at FROM depot_takes WHERE id = $1', [intId(req.params.id)])).rows[0];
+  if (!b || b.returned_at) return res.json({ ok: true });
+  if (!canReturn(req.leader, b)) return bad(res, 'forbidden', 403);
+  const lines = (await pool.query('SELECT d.name_en, d.name_ar, bi.quantity FROM depot_take_items bi JOIN depot_items d ON d.id = bi.item_id WHERE bi.take_id = $1 ORDER BY d.id', [b.id])).rows;
+  await pool.query('UPDATE depot_takes SET returned_at = now() WHERE id = $1 AND returned_at IS NULL', [b.id]);
+  audit(req.leader, 'depot_return', { items: logItems(lines) }, b.troop_id);
   res.json({ ok: true });
 }));
 
@@ -821,7 +844,11 @@ async function grantMarkXp(c, m, scoutIds, leader, present) {
      SELECT sid, $2::text || mt.title, $3::text || mt.title, $4, NULL, $5, mt.meeting_date, mt.id FROM meetings mt, unnest($1::int[]) AS sid WHERE mt.id = $6
      ON CONFLICT (meeting_id, scout_id) WHERE meeting_id IS NOT NULL DO NOTHING`, [scoutIds, names[0], names[1], present ? xp : -xp, leader.id, m.id]);
 }
-const meetingOf = async (req, id) => (await pool.query('SELECT id, meeting_date, title, kind, xp, absent_xp FROM meetings WHERE id = $1 AND troop_id = $2', [id, req.troop])).rows[0];
+const meetingOf = async (req, id) => {
+  const m = (await pool.query('SELECT id, meeting_date, title, kind, xp, absent_xp FROM meetings WHERE id = $1 AND troop_id = $2', [id, req.troop])).rows[0];
+  if (m && !(await xpOn(req.troop))) { m.xp = 0; m.absent_xp = 0; } // a troop without XP: attendance gives and takes none
+  return m;
+};
 
 app.get('/api/meetings', requireLeader, wrap(async (req, res) => {
   res.json((await pool.query(
@@ -840,8 +867,10 @@ app.get('/api/attendance/summary', requireLeader, wrap(async (req, res) => {
      WHERE s.troop_id = $1 AND s.active AND ${NOT_SUPER} GROUP BY s.id`, [req.troop])).rows);
 }));
 
-app.post('/api/meetings', requireLeader, wrap(async (req, res) => {
-  const [day, title, kind, xp, absentXp] = meetingBody(req.body);
+app.post('/api/meetings', requireLeader, requireNotMod, wrap( // mods only open meetings and mark attendance
+async (req, res) => {
+  let [day, title, kind, xp, absentXp] = meetingBody(req.body);
+  if (!(await xpOn(req.troop))) xp = absentXp = 0;
   const { rows } = await pool.query('INSERT INTO meetings (troop_id, meeting_date, title, kind, xp, absent_xp, created_by) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, meeting_date, title, kind, xp, absent_xp', [req.troop, day, title, kind, xp, absentXp, req.leader.id]);
   audit(req.leader, 'meeting_add', { name: `${day} ${title}` }, req.troop);
   res.status(201).json({ ...rows[0], present: 0 });
@@ -852,25 +881,31 @@ app.get('/api/meetings/:id', requireLeader, wrap(async (req, res) => {
   if (!m) return bad(res, 'not_found', 404);
   const [pres, abs] = await Promise.all([
     pool.query('SELECT scout_id FROM meeting_attendance WHERE meeting_id = $1', [m.id]),
-    pool.query('SELECT scout_id FROM meeting_absences WHERE meeting_id = $1', [m.id])]);
-  res.json({ ...m, present_ids: pres.rows.map((r) => r.scout_id), absent_ids: abs.rows.map((r) => r.scout_id) });
+    pool.query('SELECT scout_id, excused FROM meeting_absences WHERE meeting_id = $1', [m.id])]);
+  res.json({ ...m, present_ids: pres.rows.map((r) => r.scout_id), absent_ids: abs.rows.filter((r) => !r.excused).map((r) => r.scout_id), excused_ids: abs.rows.filter((r) => r.excused).map((r) => r.scout_id) });
 }));
 
-app.put('/api/meetings/:id', requireLeader, wrap(async (req, res) => {
+app.put('/api/meetings/:id', requireLeader, requireNotMod, wrap(async (req, res) => {
   const [day, title, kind, xp, absentXp] = meetingBody(req.body);
   const m = await meetingOf(req, intId(req.params.id));
   if (!m) return bad(res, 'not_found', 404);
+  const withXp = await xpOn(req.troop);
   await tx(async (c) => {
+    if (!withXp) { // no XP here: only the plain details change (stored XP values and entries are left alone)
+      await c.query('UPDATE meetings SET meeting_date = $1, title = $2, kind = $3 WHERE id = $4', [day, title, kind, m.id]);
+      return;
+    }
     await c.query('UPDATE meetings SET meeting_date = $1, title = $2, kind = $3, xp = $4, absent_xp = $5 WHERE id = $6', [day, title, kind, xp, absentXp, m.id]);
     // the XP already given follows the meeting's new date, title and values: for the present (table meeting_attendance) and the absent (meeting_absences)
     for (const [table, names, newXp, oldXp, sign, isPresent] of [['meeting_attendance', ATTENDED, xp, m.xp, 1, true], ['meeting_absences', ABSENT, absentXp, m.absent_xp, -1, false]]) {
+      const only = isPresent ? '' : ' AND NOT t.excused'; // an excused absence has no XP entry
       if (newXp === 0) {
-        await c.query(`DELETE FROM xp_log x USING ${table} t WHERE x.meeting_id = $1 AND t.meeting_id = x.meeting_id AND t.scout_id = x.scout_id`, [m.id]); // none for this mark any more
+        await c.query(`DELETE FROM xp_log x USING ${table} t WHERE x.meeting_id = $1 AND t.meeting_id = x.meeting_id AND t.scout_id = x.scout_id${only}`, [m.id]); // none for this mark any more
       } else {
-        await c.query(`UPDATE xp_log x SET activity = $1::text || $3::text, activity_ar = $2::text || $3::text, xp = $4, note = NULL, activity_date = $5 FROM ${table} t WHERE x.meeting_id = $6 AND t.meeting_id = x.meeting_id AND t.scout_id = x.scout_id`,
+        await c.query(`UPDATE xp_log x SET activity = $1::text || $3::text, activity_ar = $2::text || $3::text, xp = $4, note = NULL, activity_date = $5 FROM ${table} t WHERE x.meeting_id = $6 AND t.meeting_id = x.meeting_id AND t.scout_id = x.scout_id${only}`,
           [names[0], names[1], title, sign * newXp, day, m.id]);
         if (!oldXp) { // it was off: the scouts already marked get it now
-          const ids = (await c.query(`SELECT t.scout_id FROM ${table} t JOIN scouts s ON s.id = t.scout_id WHERE t.meeting_id = $1 AND s.active AND ${NOT_SUPER}`, [m.id])).rows.map((r) => r.scout_id);
+          const ids = (await c.query(`SELECT t.scout_id FROM ${table} t JOIN scouts s ON s.id = t.scout_id WHERE t.meeting_id = $1 AND s.active AND ${NOT_SUPER}${only}`, [m.id])).rows.map((r) => r.scout_id);
           await grantMarkXp(c, { id: m.id, xp, absent_xp: absentXp }, ids, req.leader, isPresent);
         }
       }
@@ -924,25 +959,26 @@ app.put('/api/meetings/:id/attendance', requireLeader, wrap(async (req, res) => 
   res.json({ ok: true });
 }));
 
-// one scout: status = 'present' | 'absent' | 'none'. Changing a mark takes the old mark's XP back and gives the new one's.
+// one scout: status = 'present' | 'absent' (no excuse: loses the absence XP) | 'excused' (absent with an excuse: no XP) | 'none'.
+// Changing a mark takes the old mark's XP back and gives the new one's.
 app.put('/api/meetings/:id/attendance/:scoutId', requireLeader, wrap(async (req, res) => {
   const m = await meetingOf(req, intId(req.params.id));
   if (!m) return bad(res, 'not_found', 404);
   const status = req.body?.status;
-  if (!['present', 'absent', 'none'].includes(status)) throw invalid();
+  if (!['present', 'absent', 'excused', 'none'].includes(status)) throw invalid();
   const sid = intId(req.params.scoutId);
   const sc = (await pool.query(`SELECT s.name, s.active, ${NOT_SUPER} AS ok FROM scouts s WHERE s.id = $1 AND s.troop_id = $2`, [sid, req.troop])).rows[0]; // only a scout of this troop
   if (!sc || (status !== 'none' && !(sc.active && sc.ok))) return bad(res, 'not_found', 404); // marking: an active scout; the super admin is never on a sheet
   const before = await tx(async (c) => {
-    const was = (await c.query('SELECT EXISTS (SELECT 1 FROM meeting_attendance WHERE meeting_id = $1 AND scout_id = $2) AS p, EXISTS (SELECT 1 FROM meeting_absences WHERE meeting_id = $1 AND scout_id = $2) AS a', [m.id, sid])).rows[0];
-    const prev = was.p ? 'present' : was.a ? 'absent' : 'none';
+    const was = (await c.query('SELECT EXISTS (SELECT 1 FROM meeting_attendance WHERE meeting_id = $1 AND scout_id = $2) AS p, (SELECT excused FROM meeting_absences WHERE meeting_id = $1 AND scout_id = $2) AS e', [m.id, sid])).rows[0];
+    const prev = was.p ? 'present' : was.e === true ? 'excused' : was.e === false ? 'absent' : 'none';
     if (prev === status) return prev; // nothing changes
     await c.query('DELETE FROM meeting_attendance WHERE meeting_id = $1 AND scout_id = $2', [m.id, sid]);
     await c.query('DELETE FROM meeting_absences WHERE meeting_id = $1 AND scout_id = $2', [m.id, sid]);
     await c.query('DELETE FROM xp_log WHERE meeting_id = $1 AND scout_id = $2', [m.id, sid]); // the old mark's XP is taken back
     if (status === 'present') await c.query('INSERT INTO meeting_attendance (meeting_id, scout_id) VALUES ($1,$2)', [m.id, sid]);
-    if (status === 'absent') await c.query('INSERT INTO meeting_absences (meeting_id, scout_id) VALUES ($1,$2)', [m.id, sid]);
-    if (status !== 'none') await grantMarkXp(c, m, [sid], req.leader, status === 'present');
+    if (status === 'absent' || status === 'excused') await c.query('INSERT INTO meeting_absences (meeting_id, scout_id, excused) VALUES ($1,$2,$3)', [m.id, sid, status === 'excused']);
+    if (status === 'present' || status === 'absent') await grantMarkXp(c, m, [sid], req.leader, status === 'present'); // an excused absence takes nothing
     return prev;
   });
   if (before !== status) {
@@ -951,6 +987,7 @@ app.put('/api/meetings/:id/attendance/:scoutId', requireLeader, wrap(async (req,
     if (before === 'absent' && m.absent_xp) audit(req.leader, 'absence_undo', meta(-m.absent_xp), req.troop);
     if (status === 'present' && m.xp) audit(req.leader, 'attendance', meta(m.xp), req.troop);
     if (status === 'absent' && m.absent_xp) audit(req.leader, 'absence', meta(-m.absent_xp), req.troop);
+    if (status === 'excused') audit(req.leader, 'absence_excused', { name: sc.name, title: m.title }, req.troop);
   }
   res.json({ ok: true });
 }));
@@ -972,7 +1009,7 @@ app.use((err, req, res, next) => {
   await pool.query("UPDATE troops SET theme = 'default' WHERE theme = 'pink'"); // the pink theme was removed: troops that used it fall back to the main purple
   let firstTroop = (await pool.query('SELECT MIN(id) AS id FROM troops')).rows[0].id;
   if (!firstTroop) {
-    firstTroop = (await pool.query("INSERT INTO troops (name_en, name_ar) VALUES ('Rovers', 'الجوالة') RETURNING id")).rows[0].id;
+    firstTroop = (await pool.query("INSERT INTO troops (name_en, name_ar, level) VALUES ('Rovers', 'الجوالة', 1) RETURNING id")).rows[0].id;
     console.log('Created the first troop "Rovers" (rename it in the Troops tab)');
   }
   // the first troop is the Rovers: give it the Rovers identity unless a theme was chosen already
