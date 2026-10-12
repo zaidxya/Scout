@@ -290,6 +290,7 @@
   "att_none_yet": "No meetings or events yet.",
   "att_count": "{n} of {m} present",
   "att_back": "← All meetings and events",
+  "back_to_list": "← Back to the list",
   "att_all": "Mark everyone present",
   "att_clear": "Clear all",
   "att_type": "Type",

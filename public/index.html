@@ -22,6 +22,7 @@
     </nav>
   </header>
   <main class="cols">
+    <button id="backList" class="btn ghost small back-list" type="button" data-i18n="back_to_list"></button>
     <section>
       <select id="troopPick" class="hidden"></select>
       <input id="search" type="search" data-i18n-ph="search" aria-label="Search">
@@ -69,6 +70,7 @@
       current = id;
       history.replaceState(null, '', '#' + id);
       drawList();
+      openDetailView(document.querySelector('main.cols')); // phones: the page replaces the list (no scrolling down)
       data = detailCache[id] || null; priv = staff ? privCache[id] || null : null; loading = !data; drawDetail(); // cached copy (or a loading note) right away
       const privReq = staff ? api('/api/leader/scouts/' + id).catch(() => null) : null; // null: another troop's scout for an admin or mod
       try {
@@ -82,8 +84,8 @@
         if (changed) drawDetail();
       } catch { if (current !== id) return; if (!data) { loading = false; drawDetail(); } }
       loading = false;
-      if (matchMedia('(max-width: 760px)').matches) detailEl.scrollIntoView({ block: 'start', behavior: 'smooth' });
     }
+    document.getElementById('backList').addEventListener('click', closeDetailView);
     search.addEventListener('input', frame(drawList));
 
     // ---- troops: one list per troop, picker only shown when there is more than one ----

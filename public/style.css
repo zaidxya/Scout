@@ -561,3 +561,11 @@ header .menu-list a.signin { margin-top: .25rem; border-top: 1px solid var(--lin
 .check input { width: auto; margin: 0; }
 .att-btn.att-excused:not(.ghost) { background: var(--muted); border-color: var(--muted); color: #fff; }
 @media (max-width: 760px) { .att-btns { flex-wrap: wrap; justify-content: flex-end; } }
+
+/* phones: a scout's page replaces the list (see openDetailView in common.js); the Back button stays in view while the page scrolls */
+.back-list { display: none; }
+@media (max-width: 760px) {
+  .cols.show-detail > section:first-of-type { display: none; }
+  .cols:not(.show-detail) > section:nth-of-type(2) { display: none; } /* the list alone until a scout is opened (the page no longer sits under the list) */
+  .cols.show-detail > .back-list { display: inline-flex; align-items: center; position: sticky; top: .5rem; z-index: 5; justify-self: start; margin: 0 0 .25rem; background: var(--paper); box-shadow: 0 2px 8px rgba(var(--primary-rgb), .15); }
+}

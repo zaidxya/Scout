@@ -70,6 +70,8 @@ CREATE TABLE IF NOT EXISTS scout_labels (
   PRIMARY KEY (scout_id, label_id)
 );
 CREATE INDEX IF NOT EXISTS scout_labels_label_idx ON scout_labels(label_id);
+-- pos: the order the roles/tags were given to the scout in (the leader area shows them in that order, the newest last); existing rows keep label order
+ALTER TABLE scout_labels ADD COLUMN IF NOT EXISTS pos INT NOT NULL DEFAULT 0;
 -- troops: every scout belongs to exactly one troop, and so does every leader account except the super admin,
 -- who is not bound to a troop and can switch between all of them.
 -- Activities and roles/tags are separate for each troop (activities.troop_id / labels.troop_id below).

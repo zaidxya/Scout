@@ -34,6 +34,7 @@
       <div id="troopBar" class="troop-bar hidden"><label for="troopSwitch" data-i18n="working_in"></label><select id="troopSwitch"></select></div>
       <div class="tabs" role="tablist">
         <button id="btn-scouts" type="button" role="tab" data-i18n="tab_scouts"></button>
+        <button id="btn-addscout" type="button" role="tab" data-i18n="add_scout"></button>
         <button id="btn-activities" type="button" role="tab" data-i18n="tab_activities"></button>
         <button id="btn-patrols" type="button" role="tab" data-unit="tab_patrols"></button>
         <button id="btn-attendance" type="button" role="tab" data-i18n="tab_attendance"></button>
@@ -50,15 +51,32 @@
       </div>
       <p id="toast" class="error" role="status"></p>
 
+      <!-- adding a scout has its own tab, between Scouts and the rest -->
+      <div id="tab-addscout" class="hidden" style="max-width:42rem">
+        <!-- the same fields as a scout's details form: only the name is required -->
+        <form id="addForm" class="panel">
+          <h2 data-i18n="add_scout"></h2>
+          <label><span data-i18n="d_name"></span><input name="name" type="text" maxlength="60" required></label>
+          <p class="hint" data-i18n="public_field"></p>
+          <p class="hint private" data-i18n="private_section"></p>
+          <div class="grid2">
+            <label><span data-i18n="d_full_name"></span><input name="full_name" type="text" maxlength="120"></label>
+            <label><span data-i18n="d_phone"></span><input name="phone" type="tel" class="phone" inputmode="numeric" pattern="[0-9]*" placeholder="0000000000" maxlength="40" dir="ltr"></label>
+            <label><span data-i18n="d_join_date"></span><input name="join_date" type="date"></label>
+            <label><span data-i18n="d_birth_date"></span><input name="birth_date" type="date"></label>
+            <label><span data-i18n="d_guardian_name"></span><input name="guardian_name" type="text" maxlength="120"></label>
+            <label><span data-i18n="d_guardian_phone"></span><input name="guardian_phone" type="tel" class="phone" inputmode="numeric" pattern="[0-9]*" placeholder="0000000000" maxlength="40" dir="ltr"></label>
+          </div>
+          <label><span data-i18n="d_address"></span><textarea name="address" maxlength="300"></textarea></label>
+          <label><span data-i18n="d_medical"></span><textarea name="medical_notes" maxlength="1000"></textarea></label>
+          <label><span data-i18n="d_notes"></span><textarea name="notes" maxlength="1000"></textarea></label>
+          <button class="btn" type="submit" data-i18n="add"></button>
+        </form>
+      </div>
+
       <div id="tab-scouts" class="cols">
+        <button id="backList" class="btn ghost small back-list" type="button" data-i18n="back_to_list"></button>
         <section>
-          <form id="addForm" class="panel">
-            <h2 data-i18n="add_scout"></h2>
-            <div class="row">
-              <input name="name" type="text" maxlength="60" data-i18n-ph="scout_name" aria-label="Scout name" required>
-              <button class="btn" type="submit" data-i18n="add"></button>
-            </div>
-          </form>
           <input id="q" type="search" data-i18n-ph="search_leader" aria-label="Search">
           <ul id="list" class="scout-list"></ul>
           <label class="inline-check"><input id="showInactive" type="checkbox"> <span data-i18n="show_inactive"></span> <small id="inactiveCount"></small></label>
@@ -224,11 +242,11 @@
     const isSuper = () => myRole === 'super_admin';
     const roams = () => myRole === 'super_admin' || myRole === 'leader';
     const xpOn = () => troopById(activeTroop())?.xp_enabled !== false; // does the troop being worked on use the XP system? // can switch between troops (leaders have a home troop, the super admin none)
-    const TABS = ['scouts', 'activities', 'patrols', 'attendance', 'labels', 'troops', 'leaders', 'log'];
+    const TABS = ['scouts', 'addscout', 'activities', 'patrols', 'attendance', 'labels', 'troops', 'leaders', 'log'];
     const isMod = () => myRole === 'mod'; // a mod (مسؤول) has the members, their activity and the patrols (and its own password)
     const canLabels = () => isSuper() || myRole === 'admin'; // roles and tags: not for mods or leaders
     // troops, accounts and the activity log are for the super admin only; roles & tags and activities also for admins (not leaders); a mod has just scouts, patrols and attendance
-    const tabAllowed = (n) => isMod() ? (n === 'scouts' || n === 'patrols' || n === 'attendance') : (n === 'troops' || n === 'leaders' || n === 'log' ? isSuper() : n === 'labels' ? canLabels() : n === 'activities' ? myRole !== 'leader' && xpOn() : true);
+    const tabAllowed = (n) => isMod() ? (n === 'scouts' || n === 'addscout' || n === 'patrols' || n === 'attendance') : (n === 'troops' || n === 'leaders' || n === 'log' ? isSuper() : n === 'labels' ? canLabels() : n === 'activities' ? myRole !== 'leader' && xpOn() : true);
 
     const msg = (text, ok) => { $('toast').textContent = text || ''; $('toast').className = 'error' + (ok ? ' ok' : ''); };
     const fail = (e) => { if (e.status === 401 && e.code === 'unauthorized') show(false); msg(errText(e)); };
@@ -253,6 +271,7 @@
         $('btn-' + x).setAttribute('aria-selected', String(x === n));
         if (x === n) $('btn-' + x).scrollIntoView({ block: 'nearest', inline: 'nearest' });
       });
+      if (n === 'addscout') $('addForm').elements.name.focus();
       if (n === 'activities') loadActs();
       if (n === 'patrols') loadPatrols();
       if (n === 'attendance') openAttendance();
@@ -351,6 +370,7 @@
 
     async function openScout(id, scrollNext = true) {
       current = id; drawList();
+      if (scrollNext) openDetailView($('tab-scouts')); // phones: the page replaces the list (no scrolling down)
       const troopAtStart = troopLoad;
       let r = null;
       try { r = await Promise.all([api('/api/scouts/' + id), api('/api/leader/scouts/' + id), loadActsQuiet()]); }
@@ -361,8 +381,8 @@
       [data, det] = r || [null, null];
       if (data && det) data = { ...data, has_photo: det.has_photo, photo_hidden: det.photo_hidden }; // the public copy hides a hidden picture; here it is shown
       drawDetail();
-      if (scrollNext && matchMedia('(max-width: 760px)').matches) $('right').scrollIntoView({ block: 'start', behavior: 'smooth' });
     }
+    $('backList').addEventListener('click', closeDetailView);
     async function loadActsQuiet() { if (!acts.length) acts = await api('/api/activities'); }
 
     // phone fields accept digits only (Arabic-Indic digits are converted to 0-9)
@@ -397,7 +417,7 @@
     function drawDetail() {
       const box = $('right');
       box.replaceChildren();
-      if (!data || !det) return box.append(el('p', { class: 'empty' }, t('select_scout')));
+      if (!data || !det) { closeDetailView(); return box.append(el('p', { class: 'empty' }, t('select_scout'))); } // nobody selected any more (deactivated, promoted, troop switch): back to the list
       const id = data.id;
       const refresh = async () => { await loadScouts(); if (current === id) await openScout(id, false); }; // unless another scout (or troop) was picked meanwhile
 
@@ -437,7 +457,8 @@
         try { await api(`/api/scouts/${data.id}/labels`, 'PUT', { label_ids: ids }); msg(''); await refresh(); } catch (e) { fail(e); }
       };
       const labelBlock = (kind, titleKey) => {
-        const own = labels.filter((l) => l.kind === kind && mine.includes(l.id));
+        // in the order they were given: a newly added one goes last, at the left end of the row (the layout is right to left), and the others stay put
+        const own = mine.map((id) => labels.find((l) => l.id === id)).filter((l) => l && l.kind === kind);
         const free = labels.filter((l) => l.kind === kind && !mine.includes(l.id));
         const pick = el('select', { 'aria-label': t(titleKey) }, el('option', { value: '' }, t('add_to_scout')),
           free.map((l) => el('option', { value: l.id }, labelName(l))));
@@ -544,11 +565,12 @@
         el('div', { style: 'height:1.25rem' }), form, promotePanel, del, hardDel);
     }
 
+    $('addForm').querySelectorAll('input.phone').forEach((input) => input.addEventListener('input', () => { const v = digitsOnly(input.value); if (v !== input.value) input.value = v; }));
     $('addForm').addEventListener('submit', async (ev) => {
       ev.preventDefault();
       try {
-        const s = await api('/api/scouts', 'POST', { name: new FormData(ev.target).get('name') });
-        ev.target.reset(); msg(''); await loadScouts(); await openScout(s.id);
+        const s = await api('/api/scouts', 'POST', Object.fromEntries(new FormData(ev.target)));
+        ev.target.reset(); msg(''); showTab('scouts'); await loadScouts(); await openScout(s.id); // back to the Scouts tab with the new scout open
       } catch (e) { fail(e); }
     });
 

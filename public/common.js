@@ -8,7 +8,7 @@ const THEMES = {
   rovers: { logo: '/logo.jpg', wordmark: true, color: '#4a0313' },
   forest: { logo: '/logo-mark.png', wordmark: false, color: '#1d5c3f' }, // Forest (boys)
   forest_girls: { logo: '/logo-mark.png', wordmark: false, color: '#1d5c3f' },
-  ocean: { logo: '/logo-guides.png', wordmark: false, color: '#14507a' },
+  ocean: { logo: '/logo-guides-v2.png', wordmark: false, color: '#14507a' }, // Aqua (guides): the fleur-de-lis outline in beige
   yellow: { logo: '/logo-cubs.png', onWhite: true, wordmark: false, color: '#f6c21c' }, // Yellow (cubs)
   yellow_hannabies: { logo: '/logo-hannabies.png', onWhite: true, wordmark: false, color: '#f6c21c' },
   red: { logo: '/logo-mark.png', wordmark: false, color: '#c62828' }, // Red (guides)
@@ -183,6 +183,27 @@ const norm = (v) => String(v ?? '').toLowerCase().normalize('NFKD')
   .replace(/[\u064B-\u065F\u0670\u0640]/g, '').replace(/[أإآ]/g, 'ا').replace(/ى/g, 'ي').replace(/ة/g, 'ه');
 
 // patrols (optional): the troop's patrols; when it has any, the list is split under a heading per patrol, with scouts in none last
+// phones: opening a scout shows their page on its own screen (the list is hidden) instead of scrolling down past the whole list.
+// Back (the button, or the phone's own back) returns to the list exactly where it was. root = the element holding the list and the page (class "cols").
+let detailRoot = null, detailScroll = 0;
+const isPhone = () => matchMedia('(max-width: 760px)').matches;
+function openDetailView(root) {
+  if (!isPhone()) return; // wider screens show the list and the page side by side
+  if (!root.classList.contains('show-detail')) { detailScroll = window.scrollY; history.pushState({ scoutView: 1 }, ''); } // one history step, so the phone's back button comes here
+  detailRoot = root; root.classList.add('show-detail');
+  window.scrollTo({ top: 0, behavior: 'instant' });
+}
+function leaveDetailView() {
+  if (!detailRoot || !detailRoot.classList.contains('show-detail')) return;
+  detailRoot.classList.remove('show-detail');
+  window.scrollTo({ top: detailScroll, behavior: 'instant' }); // back to the spot in the list
+}
+function closeDetailView() {
+  if (!detailRoot || !detailRoot.classList.contains('show-detail')) return;
+  if (history.state && history.state.scoutView) history.back(); else leaveDetailView(); // back() fires popstate, which leaves the view
+}
+window.addEventListener('popstate', leaveDetailView);
+
 // does the troop being looked at use the XP system? (pages call setXpEnabled when the troop is known; off hides every XP number and history)
 let xpEnabled = true;
 const setXpEnabled = (v) => { xpEnabled = v !== false; };

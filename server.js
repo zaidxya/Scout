@@ -325,7 +325,7 @@ app.get('/api/leader/scouts', requireLeader, wrap(async (req, res) => {
        EXISTS (SELECT 1 FROM leaders l WHERE l.scout_id = s.id) AS is_leader,
        EXISTS (SELECT 1 FROM leaders l WHERE l.scout_id = s.id AND l.role = 'super_admin') AS is_super,
        EXISTS (SELECT 1 FROM leaders l WHERE l.scout_id = s.id AND l.role <> 'super_admin') AS in_council,
-       COALESCE((SELECT json_agg(sl.label_id) FROM scout_labels sl WHERE sl.scout_id = s.id), '[]'::json) AS label_ids
+       COALESCE((SELECT json_agg(sl.label_id ORDER BY sl.pos, sl.label_id) FROM scout_labels sl WHERE sl.scout_id = s.id), '[]'::json) AS label_ids
      FROM scouts s
      WHERE s.troop_id = $1
      ORDER BY (SELECT COALESCE(MAX(l.priority), 0) FROM scout_labels sl JOIN labels l ON l.id = sl.label_id AND l.kind = 'role' WHERE sl.scout_id = s.id) DESC, (CASE WHEN COALESCE((SELECT t.xp_enabled FROM troops t WHERE t.id = s.troop_id), true) THEN COALESCE((SELECT SUM(xp) FROM xp_log x WHERE x.scout_id = s.id), 0) ELSE 0 END) DESC, s.name`,
@@ -443,7 +443,8 @@ app.put('/api/scouts/:id/labels', requireLeader, requireLabelEditor, wrap(async 
   await tx(async (c) => {
     await c.query('DELETE FROM scout_labels WHERE scout_id = $1', [id]);
     if (labelIds.length) await c.query(
-      'INSERT INTO scout_labels (scout_id, label_id) SELECT $1::int, id FROM labels WHERE id = ANY($2::int[]) AND troop_id = $3', [id, labelIds, sc.troop_id]);
+      // the position is the place in the list the page sent (the ones already there first, a newly added one last)
+      'INSERT INTO scout_labels (scout_id, label_id, pos) SELECT $1::int, l.id, u.ord::int FROM unnest($2::int[]) WITH ORDINALITY AS u(id, ord) JOIN labels l ON l.id = u.id WHERE l.troop_id = $3', [id, labelIds, sc.troop_id]);
   });
   audit(req.leader, 'labels_set', { name: sc.name }, sc.troop_id);
   res.json({ ok: true });
@@ -474,11 +475,17 @@ app.get('/api/leader/scouts/:id', requireLeader, wrap(async (req, res) => {
 }));
 
 app.post('/api/scouts', requireLeader, wrap(async (req, res) => {
-  const name = text(req.body?.name, 60);
+  const b = req.body || {};
+  const name = text(b.name, 60);
   if (!name) throw invalid();
-  // scouts are added to the troop being worked on (a leader's own, or the one the super admin switched to)
+  // scouts are added to the troop being worked on (a leader's own, or the one the super admin switched to); the details are optional and
+  // checked exactly like when a scout is edited
   const troop = req.troop;
-  const { rows } = await pool.query('INSERT INTO scouts (name, troop_id) VALUES ($1, $2) RETURNING id, name', [name, troop]);
+  const { rows } = await pool.query(
+    `INSERT INTO scouts (name, troop_id, full_name, phone, join_date, address, birth_date, guardian_name, guardian_phone, medical_notes, notes)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id, name`,
+    [name, troop, text(b.full_name, 120), phone(b.phone), date(b.join_date), text(b.address, 300), date(b.birth_date),
+     text(b.guardian_name, 120), phone(b.guardian_phone), text(b.medical_notes, 1000), text(b.notes, 1000)]);
   audit(req.leader, 'scout_add', { name }, troop);
   res.status(201).json(rows[0]);
 }));
