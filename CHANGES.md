@@ -279,3 +279,98 @@ The English labels were left as they were (for example "Dashboard" and "Leader a
 - **XP totals are looked up per scout** (through the existing `xp_log` index) instead of summing the whole XP table on every list request, so the scout lists stay fast as the history grows. New index on `leaders.scout_id` for the leader-account checks in the lists.
 - **One session check per page** instead of two: `common.js` asks `/api/me` once and the leader, depot and account pages reuse the answer.
 - Cleanups: the login-attempt memory is pruned (it used to grow forever), the duplicate cache rules and the unneeded optional-`compression` fallback were removed, shared permission code is in one place, and a few misplaced comments were moved next to the code they describe.
+
+## Fix pass before new features (first run against a real database)
+Everything was run for the first time against a real PostgreSQL 17: a fresh install, a restart, an upgrade from the previous version (existing data and sign-ins carry over), an API test of every route and permission rule (106 checks), and the pages in a browser.
+
+**Security**
+- **Password changes and resets now sign the account out.** Sessions last ~400 days, so before this a reset never actually took anyone's access away. New column `leaders.session_v` (added automatically); every cookie carries it and a reset raises it. Your own password change keeps the current browser signed in and signs out the others. `reset-password.js` does the same. Nobody is signed out by deploying this.
+- **Sign-in redirect could send people to another site** (`/leader.html?next=/\evil.com` passed the check). It now only goes to pages of this site.
+- Photos of deactivated scouts are no longer public (the rest of their page already wasn't).
+- Basic browser protection headers (no framing of the site, no MIME sniffing, same-origin referrer).
+- The sign-in limit (10 per 15 minutes per IP) now counts failed attempts only, so leaders sharing one connection aren't locked out by normal use.
+
+**Server errors**
+- An impossible date (e.g. 2025-02-31), an id that is too large, broken JSON or a too-large request answered with a 500 or an untranslated message. They now answer "check the details you entered" (or a new "too large" message).
+
+**Leader area**
+- **Double-clicking Award gave the XP twice** (also duplicated scouts, meetings, depot items...). A form is now locked while its request is running.
+- **A slow reply could show the wrong scout**, and after a troop switch picking a role there could wipe that scout's roles and tags. Replies for a scout or troop that is no longer selected are now dropped; rapid troop switching ends on the right troop.
+- **Attendance sheet:** an account that is listed twice (leaders' patrol + its own patrol) had two checkboxes that didn't stay in step, and "Mark everyone present" only updated one of them. Both copies now follow each other.
+- Meeting dates defaulted to the UTC day (yesterday until 03:00 in Syria) and the date picker blocked today. They now use the local day.
+- Patrol counts in the Patrols tab now match the lists (active scouts only, and the leaders' patrol counts the accounts in it; it used to show 0).
+- After adding a tag, the permissions box of the next role stayed hidden.
+- Switching language no longer throws away text typed in the scout details form.
+- Clicking inside the confirmation popup's padding no longer cancels it.
+
+**Depot:** text typed in one row is no longer lost when another row is saved or deleted, or when searching.
+
+**Wording:** a few Arabic texts said رهط in every troop; they now follow the troop's word (رهط / طليعة). Unknown error codes show the general error text instead of a raw key. Removed an unused text key.
+
+**README** rewritten to match the code: three account levels (including mod), sessions and password resets, the full API list, deactivate/promote instead of delete, the leaders' patrol names, and the Troubleshooting advice to delete all accounts (that would remove every account) was replaced.
+
+Files touched: `server.js`, `schema.sql`, `reset-password.js`, `public/common.js`, `public/leader.html`, `public/depot.html`, both language files, `README.md`.
+
+## Handoff notes
+- README now starts with "Working on this project": update `CHANGES.md` and `README.md` with every change, no database testing unless asked, and send the whole project back as a zip (without `node_modules`).
+
+## Depot: tidier list, adding and quantities
+- **Items are no longer shown as open forms.** Every row is read-only, like visitors see it: name, notes, and the quantity. Admins and the super admin get a small **Edit** button per row that opens that one row as a form (both names, quantity, notes) with Save, Cancel and Delete (set apart at the end). Only one row is open at a time; Cancel or Esc closes it and drops the typed changes.
+- **Adding is behind one button.** The super admin sees **+ Add item** next to the title; it opens a short form (Arabic name first, then English, quantity, notes) that closes again after adding or on Cancel/Esc. The new item is briefly highlighted in the list.
+- **Quantities are clear.** Each item's quantity sits in its own box with a "الكمية / Quantity" caption and a larger number; at 0 the box turns red and reads "نفدت / Out of stock".
+- **The count says what it counts:** "المواد المسجلة / Items listed" with the number in a pill, and "3 من 12 / 3 of 12" while searching.
+- New text keys: `depot_of`, `depot_out` (and new wording for `depot_total`). Files touched: `public/depot.html`, `public/style.css`, both language files, `README.md`.
+- Not tested against a database (checked with sample data only).
+
+## Wording: المستودع
+- The Arabic name of the depot is now **المستودع** (was مستودع) in the header menu and under the site name on the depot page (`depot` key in `public/i18n/ar.json`). English is unchanged.
+
+## Depot reservations (build 34)
+- **Admins, mods and the super admin can reserve depot items for a time window.** Each item has a **حجز / Reserve** button (hidden when the quantity is 0) that opens a booking form in its row: from / to (date and time), how many, an optional note. While the times change, the form shows "المتوفر في هذا الوقت / Available at this time: N".
+- **No overbooking:** the server locks the item while booking and refuses (`not_available`, with how many are free) if the quantity plus everything booked in an overlapping window would go over the item's quantity. Every overlapping booking counts, which is simple and never overbooks. Windows end in the future and are at most 60 days.
+- **Upcoming reservations** list under the inventory (signed-in accounts only): item × quantity, the time window, who booked it, their troop and the note; the one running now is marked "جارٍ الآن / Now". Items also show "محجوز الآن / Reserved now: N" while a booking is running.
+- **Cancelling:** the one who booked can cancel it; admins and the super admin can cancel anyone's. Bookings and cancellations go to the activity log. Deleting a depot item deletes its bookings.
+- New table `depot_reservations` (created automatically on startup). New routes `GET /api/depot/reservations`, `POST /api/depot/:id/reservations`, `DELETE /api/depot/reservations/:id`. New text keys `depot_reserve`, `depot_from`, `depot_to`, `depot_free`, `depot_reserved_now`, `depot_res_*`, `err_not_available`, `audit_depot_reserve`, `audit_depot_unreserve`. Date-and-time fields now get the standard input style.
+- Files touched: `schema.sql`, `server.js`, `public/depot.html`, `public/leader.html` (log wording), `public/style.css`, both language files, `README.md`. Not run.
+
+## Depot reservations by troop, with a basket (build 35, "basket")
+- **Reservations are now made for a troop, not for a person.** Admins and mods always book for their own troop (every admin/mod account belongs to one). The super admin belongs to none, so the basket shows a **باسم الفرقة / For troop** picker (defaults to the troop last used in the leader area). Admins and mods see "الحجز باسم: {troop} / Reserving for: {troop}" instead.
+- **A basket instead of one item at a time.** Each item's **Reserve** button is now **أضف إلى السلة / Add to basket** (it then reads "✓ في السلة / In basket"; pressing it again takes the item out). The **سلة الحجز / Reservation basket** opens above the search box with: the troop, one from / to window for the whole basket, one line per item (quantity, "Available at this time: N" for that window, red when asking for more, × to remove), an optional note, **احجز محتويات السلة / Reserve the basket** and **إفراغ السلة / Empty basket** (asks first). The basket, window and note are kept in the browser (`localStorage` key `depot_basket`) until booked or emptied; items deleted from the depot meanwhile drop out of it. A floating "Basket (N)" button scrolls back to it while it is out of view.
+- **All or nothing:** the server locks every item in the basket (in id order, so two baskets can't deadlock), checks each against every overlapping booking, and refuses the whole basket (`409 not_available` with `short: [{item_id, available}]`) if any item hasn't enough; the page then reloads what is free so the short lines turn red.
+- **Upcoming reservations** now shows one entry per booking: the troop (bold), the items × quantities, the window, "حجزه / Booked by {name}" and the note. Your own troop's bookings have a coloured edge.
+- **Cancelling** cancels the whole booking: the one who made it, the **admins of that troop**, and the super admin (before: any admin could cancel anyone's). Mods only their own.
+- **Activity log:** bookings and cancellations are now written to the log of the troop they are for (before: to no troop, so only the super admin saw them), as `depot_book` / `depot_unbook` with the list of items in both languages. Old `depot_reserve` / `depot_unreserve` entries still show.
+- **Database:** new tables `depot_bookings` (troop, window, note, who) and `depot_booking_items` (booking, item, quantity). On the first startup the build 34 table `depot_reservations` is converted (each old row becomes a one-item booking of its troop; the super admin's, which had no troop, go to the first troop) and dropped. Deleting a depot item removes it from every booking, and a booking left empty is removed.
+- **Routes:** `GET /api/depot/bookings`, `POST /api/depot/bookings` (`items`, `starts_at`, `ends_at`, `note`, `troop_id` for the super admin), `DELETE /api/depot/bookings/:id`. Removed: `GET /api/depot/reservations`, `POST /api/depot/:id/reservations`, `DELETE /api/depot/reservations/:id`.
+- **Text keys:** new `depot_basket`, `depot_basket_add`, `depot_in_basket`, `depot_basket_remove`, `depot_basket_clear`, `depot_basket_confirm`, `depot_for`, `depot_for_troop`, `depot_book`, `depot_booked`, `depot_by`, `audit_depot_book`, `audit_depot_unbook`; removed `depot_reserve`.
+- **Handoff:** zips are now saved in the working folder as `scout-app-troops_NN (word).zip` (see README, "Working on this project").
+- Files touched: `schema.sql`, `server.js`, `public/depot.html`, `public/leader.html` (log wording), `public/style.css`, both language files, `README.md`. Not run against a database; `server.js` and the page scripts pass a syntax check, and every text key the depot page uses exists in both language files.
+
+## Fix: the basket is per account (build 36, "account")
+- The reservation basket was saved in the browser under one shared key, so signing in as another account on the same browser showed the previous account's basket. It is now saved per account (`localStorage` key `depot_basket:<username>`); the old shared key `depot_basket` is deleted on the next depot page load. Signing back in as the same account on that browser brings its basket back; a renamed account starts with an empty one.
+- File touched: `public/depot.html`, `README.md`. Not run; the page script passes a syntax check.
+
+## Reserved by the display name (build 37, "name")
+- Upcoming reservations now say **تم الحجز بواسطة {name} / Reserved by {name}** (was "Booked by" with the username). The name is the display name on the booker's scout profile, read when the list is loaded (so a renamed profile shows its new name); if the account no longer exists, the username saved with the booking is shown. Text key `depot_by` reworded in both languages.
+- Files touched: `server.js` (`GET /api/depot/bookings` joins leaders and scouts), both language files, `README.md`. Not run; `server.js` passes a syntax check.
+
+## Reservation history (build 38, "history")
+- Finished reservations were never deleted, they only dropped off the Upcoming list. A new **الحجوزات السابقة / Past reservations** section under it (closed until opened, signed-in accounts only) lists them: latest first, up to 200, same details (troop, items, window, who reserved, note), slightly faded, no cancel button. It loads when opened and refreshes with the page data while open.
+- Cancelled reservations are still deleted for good (only the activity log keeps them).
+- `GET /api/depot/bookings?past=1` returns the history. New keys `depot_past_title`, `depot_past_none`. Files touched: `server.js`, `public/depot.html`, `public/style.css`, both language files, `README.md`. Not run; scripts pass a syntax check.
+
+## Private details on the dashboard, the Leader account type, no more role permissions (build 39, "leader")
+- **Dashboard shows a scout's private details to signed-in accounts, read-only.** Under the scout's name/XP, a **التفاصيل الخاصة / Private details** card lists the fields set in the leader area (full name, phone as a tap-to-call link, join date, date of birth, guardian name and phone, address, medical notes, other notes; empty ones are skipped) and the scout's **tags**, with an **Edit in the leader area** button (it also remembers the scout's troop for a leader/super admin). Editing stays in the leader area only. It uses `GET /api/leader/scouts/:id`, which now also returns `tags`; admins and mods get it for scouts of their own troop only (another troop's scout shows just the public page), the super admin and leaders for every troop. Visitors never call it. The page asks `/api/me` once before the first scout opens (`staff`) and keeps the private copy in memory only (`privCache`), never in `localStorage`.
+- **New account type: Leader / قائد** (`leaders.role = 'leader'`; the value was already allowed by the database). Like an admin, but it has a **home troop and can jump between troops with the troop switcher, like the super admin** (the server treats `X-Troop` from a leader like the super admin's, falling back to the leader's home troop). It has **no Roles & tags** (tab hidden, the roles/tags block on a scout's page hidden, `POST/PUT/DELETE /api/labels` and `PUT /api/scouts/:id/labels` refuse it), and **no Troops, Leaders or Activity log** tabs/routes. It can edit/remove depot items (not add), reserve for any troop (troop picker in the basket, like the super admin) and cancel any reservation. Created by the super admin in the Leaders tab (new "Leader" choice in the account type list). The account type table is in the README.
+- **Role permissions are gone.** Roles no longer carry *view_log* / *manage_accounts*: the permissions box on the add-role form, the checkboxes under each role, `permissions` in the label routes and `perms` in `/api/login` and `/api/me` are removed, along with the code that checked and limited them. **Accounts (Leaders tab) and the activity log are now super admin only**, so an admin that had been given those through a role has lost them. `labels.permissions` stays in the database, unused. Text keys `perm_view_log`, `perm_manage_accounts`, `role_perms`, `role_perms_hint` removed.
+- **Startup:** the step that turned every `leader` account into an admin on each start is removed (it would have demoted the new Leaders).
+- New text keys: `private_info`, `private_view_hint`, `private_edit`, `private_none` (both languages). New CSS for the card (`.priv`, `.priv-dl`); the permission checkbox styles are removed.
+- Files touched: `server.js`, `schema.sql` (comment), `public/index.html`, `public/leader.html`, `public/depot.html`, `public/style.css`, both language files, `README.md`. Not run against a database; `server.js` and the page scripts pass a syntax check.
+
+## Fix: every signed-in account sees the private details, in any troop (build 40, "everyone")
+- Build 39 showed the dashboard's private details card to admins and mods only for scouts of their own troop. Now **every signed-in account sees it for scouts of any troop**, read-only: `GET /api/leader/scouts/:id` no longer limits reading to the account's troop (editing, `PUT /api/scouts/:id`, is still limited). The **Edit in the leader area** button only shows where the account may edit (its own troop; any troop for the super admin and leaders).
+- Files touched: `server.js`, `public/index.html`, `README.md`. Not run; syntax-checked.
+
+## Fix: phone number alignment in the dashboard's private details (build 41, "alignment")
+- On desktop the phone number (and any English value) sat at the far end of its row instead of next to its label: each value's direction was chosen from its own text, and digits alone count as left-to-right in a right-to-left page. Values now keep the page direction (so they start right beside their label) and are wrapped in `<bdi>` so each still reads correctly; the phone link is an isolated left-to-right inline.
+- Files touched: `public/index.html`, `public/style.css`. Not run.

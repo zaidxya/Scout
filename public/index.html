@@ -33,6 +33,8 @@
   <script>
     const listEl = document.getElementById('list'), detailEl = document.getElementById('detail'), search = document.getElementById('search');
     let scouts = [], patrols = [], troops = [], troop = null, current = null, data = null;
+    let staff = false, me = null, priv = null; // staff: a signed-in account sees the scout's private details (read-only); editing stays in the leader area
+    const privCache = {};
     const picker = document.getElementById('troopPick');
     const detailCache = {}; // last seen detail per scout, shown instantly while the fresh copy loads
 
@@ -46,18 +48,36 @@
       detailEl.replaceChildren();
       if (loading) return detailEl.append(el('p', { class: 'empty' }, t('loading')));
       if (!data) return detailEl.append(el('p', { class: 'empty' }, t('select_scout')));
-      detailEl.append(renderDetailHead(data), renderLog(data));
+      detailEl.append(renderDetailHead(data), ...(priv && priv.id === data.id ? [privateCard(priv)] : []), renderLog(data));
+    }
+    // the private details as plain text: signed-in accounts only, and only for scouts the account may open (its own troop; all troops for the super admin and leaders)
+    const PRIV = [['d_full_name', 'full_name'], ['d_phone', 'phone', 'tel'], ['d_join_date', 'join_date', 'day'], ['d_birth_date', 'birth_date', 'day'],
+      ['d_guardian_name', 'guardian_name'], ['d_guardian_phone', 'guardian_phone', 'tel'], ['d_address', 'address'], ['d_medical', 'medical_notes'], ['d_notes', 'notes']];
+    function privateCard(p) {
+      const rows = PRIV.filter(([, k]) => p[k]).flatMap(([label, k, kind]) => [
+        el('dt', {}, t(label)),
+        el('dd', {}, el('bdi', {}, kind === 'tel' ? el('a', { href: 'tel:' + p[k], dir: 'ltr' }, p[k]) : kind === 'day' ? fmtDay(p[k]) : p[k]))]); // dd keeps the page direction (so every value starts beside its label); bdi gives each value its own text direction
+      return el('div', { class: 'panel priv' },
+        el('h3', {}, t('private_info')),
+        el('p', { class: 'hint' }, t('private_view_hint')),
+        rows.length ? el('dl', { class: 'priv-dl' }, rows) : el('p', { class: 'empty' }, t('private_none')),
+        p.tags && p.tags.length ? el('div', {}, el('h4', {}, t('tags')), roleChips(p.tags)) : '',
+        !(me && (me.role === 'super_admin' || me.role === 'leader' || me.troop_id === p.troop_id)) ? '' : // editing is only offered where the account may edit
+        el('a', { class: 'btn ghost small', href: '/leader.html', onclick: () => { try { localStorage.setItem('leaderTroop', String(p.troop_id)); } catch { /* ignore */ } } }, t('private_edit')));
     }
     async function openScout(id) {
       current = id;
       history.replaceState(null, '', '#' + id);
       drawList();
-      data = detailCache[id] || null; loading = !data; drawDetail(); // cached copy (or a loading note) right away
+      data = detailCache[id] || null; priv = staff ? privCache[id] || null : null; loading = !data; drawDetail(); // cached copy (or a loading note) right away
+      const privReq = staff ? api('/api/leader/scouts/' + id).catch(() => null) : null; // null: another troop's scout for an admin or mod
       try {
         const fresh = await api('/api/scouts/' + id);
         if (current !== id) return; // the visitor already picked someone else
-        const changed = JSON.stringify(fresh) !== JSON.stringify(data);
-        detailCache[id] = data = fresh; loading = false;
+        const freshPriv = privReq ? await privReq : null;
+        if (current !== id) return;
+        const changed = JSON.stringify(fresh) !== JSON.stringify(data) || JSON.stringify(freshPriv) !== JSON.stringify(priv);
+        detailCache[id] = data = fresh; privCache[id] = priv = freshPriv; loading = false;
         if (fresh.troop_id && fresh.troop_id !== troop && troops.some((x) => x.id === fresh.troop_id)) await switchTroop(fresh.troop_id, true); // link to a scout of another troop
         if (changed) drawDetail();
       } catch { if (current !== id) return; if (!data) { loading = false; drawDetail(); } }
@@ -115,6 +135,7 @@
       const freshReq = saved ? loadList(saved).catch(() => null) : null; // start loading it now, in parallel
       const freshPReq = saved ? loadPatrols(saved).catch(() => null) : null;
       await initLang();
+      me = await getMe(); staff = !!me; // signed in? (also decides whether a scout's private details are fetched)
       if (saved && listCache(saved).length) { troop = saved; scouts = listCache(saved); patrols = patrolCache(saved); useTroopWord(saved); drawList(); }
       troops = await troopsReq;
       const want = troops.some((x) => x.id === saved) ? saved : troops[0]?.id;

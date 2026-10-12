@@ -25,76 +25,325 @@
     <p id="toast" class="error" role="status"></p>
     <div id="app">
       <div class="panel">
-        <h2 data-i18n="depot_title"></h2>
-        <p class="hint" data-i18n="depot_hint"></p>
-        <p id="editNote" class="hint hidden" data-i18n="depot_login_note"></p>
-        <input id="q" type="search" data-i18n-ph="depot_search" aria-label="Search">
-        <p class="hint"><span data-i18n="depot_total"></span>: <b id="count"></b></p>
-        <ul id="items" class="simple-list"></ul>
-        <form id="addForm" class="hidden">
+        <div class="depot-head">
+          <div class="grow">
+            <h2 data-i18n="depot_title"></h2>
+            <p class="hint" data-i18n="depot_hint"></p>
+          </div>
+          <button id="addBtn" class="btn small hidden" type="button" aria-expanded="false" aria-controls="addForm">+ <span data-i18n="depot_add"></span></button>
+        </div>
+        <!-- adding (super admin): closed until the button above opens it -->
+        <form id="addForm" class="depot-form hidden">
           <h3 data-i18n="depot_add"></h3>
           <div class="grid2">
-            <label><span data-i18n="name_en"></span><input name="name_en" type="text" maxlength="80" dir="ltr"></label>
             <label><span data-i18n="name_ar"></span><input name="name_ar" type="text" maxlength="80" dir="rtl"></label>
+            <label><span data-i18n="name_en"></span><input name="name_en" type="text" maxlength="80" dir="ltr"></label>
           </div>
-          <div class="grid2">
+          <div class="grid2 qty">
             <label><span data-i18n="depot_quantity"></span><input name="quantity" type="number" min="0" max="1000000" step="1" required value="1"></label>
             <label><span data-i18n="depot_notes"></span><input name="notes" type="text" maxlength="500"></label>
           </div>
-          <button class="btn" type="submit" data-i18n="add"></button>
+          <div class="depot-actions">
+            <button class="btn" type="submit" data-i18n="add"></button>
+            <button id="addCancel" class="btn ghost" type="button" data-i18n="cancel"></button>
+          </div>
         </form>
+        <p id="editNote" class="hint hidden" data-i18n="depot_login_note"></p>
+        <!-- signed-in accounts: the basket. Items are added from the list below and booked together for one time window, for a troop -->
+        <form id="basket" class="depot-form depot-basket hidden">
+          <h3><span data-i18n="depot_basket"></span> <b id="basketN" class="depot-basket-n"></b></h3>
+          <p id="basketTroop" class="depot-for"></p>
+          <label id="troopPick" class="hidden"><span data-i18n="depot_for_troop"></span><select name="troop_id"></select></label>
+          <div class="grid2">
+            <label><span data-i18n="depot_from"></span><input name="starts_at" type="datetime-local" required></label>
+            <label><span data-i18n="depot_to"></span><input name="ends_at" type="datetime-local" required></label>
+          </div>
+          <ul id="basketList" class="depot-list depot-lines"></ul>
+          <label><span data-i18n="depot_notes"></span><input name="note" type="text" maxlength="200"></label>
+          <div class="depot-actions">
+            <button class="btn" type="submit" data-i18n="depot_book"></button>
+            <button id="basketClear" class="btn ghost" type="button" data-i18n="depot_basket_clear"></button>
+          </div>
+        </form>
+        <input id="q" type="search" data-i18n-ph="depot_search" aria-label="Search">
+        <p id="count" class="depot-count" aria-live="polite"></p>
+        <ul id="items" class="depot-list"></ul>
+        <!-- signed-in accounts: what is booked from now on -->
+        <div id="resBox" class="depot-res hidden">
+          <h3 data-i18n="depot_res_title"></h3>
+          <ul id="resList" class="depot-list"></ul>
+        </div>
+        <!-- the reservation history: bookings that are over (loaded when opened) -->
+        <details id="pastBox" class="depot-res depot-past hidden">
+          <summary data-i18n="depot_past_title"></summary>
+          <ul id="pastList" class="depot-list"></ul>
+        </details>
       </div>
     </div>
+    <!-- a shortcut back to the basket while it is out of view (phones: after scrolling down the list) -->
+    <a id="basketPill" class="depot-pill hidden" href="#basket"></a>
   </main>
   <script src="/common.js"></script>
   <script>
     const $ = (id) => document.getElementById(id);
-    let items = [], canEdit = false, isSuper = false; // everyone reads; admins and the super admin edit; only the super admin adds
+    let items = [], canEdit = false, isSuper = false, roams = false; // everyone reads; admins, leaders and the super admin edit; only the super admin adds; the super admin and leaders pick the troop of a reservation
+    let canReserve = false, bookings = []; // every signed-in account (admin, mod, super admin) can book items for its troop
+    let myTroop = null, troops = []; // the account's own troop (none for the super admin, who picks one in the basket)
+    let editing = null, fresh = null; // the one item whose edit form is open; fresh: the item just added (briefly highlighted)
+    // the basket: item id -> quantity (as typed). Kept in this browser with the window and note, so a reload doesn't empty it
+    const basket = new Map();
+    let basketKey = null; // the saved basket belongs to the signed-in account: another account on the same browser starts with an empty one
     const msg = (text, ok) => { $('toast').textContent = text || ''; $('toast').className = 'error' + (ok ? ' ok' : ''); };
     const fail = (e) => msg(errText(e));
     const nm = (i) => (state.lang === 'ar' ? i.name_ar : i.name_en);
+    // item id -> what was typed in its edit form but not saved yet, so a redraw (search, language switch, reopening it) keeps it
+    const drafts = new Map();
+
+    // a row as everyone sees it: name and notes, then the quantity in its own labelled box (red "out of stock" at 0)
+    function itemRow(i) {
+      const out = i.quantity === 0;
+      const now = Date.now(), bookedNow = held(i.id, now, now + 1); // signed-in accounts also see how many are out on a booking right now
+      return el('li', { class: 'depot-item' + (out ? ' out' : '') + (i.id === fresh ? ' fresh' : '') },
+        el('div', { class: 'grow' }, el('b', { dir: 'auto' }, nm(i)), i.notes ? el('small', { class: 'depot-notes', dir: 'auto' }, i.notes) : '',
+          bookedNow ? el('small', { class: 'depot-booked' }, t('depot_reserved_now').replace('{n}', fmt(bookedNow))) : ''),
+        el('div', { class: 'depot-qty' }, el('small', {}, t(out ? 'depot_out' : 'depot_quantity')), el('b', {}, fmt(i.quantity))),
+        canReserve || canEdit ? el('div', { class: 'depot-btns' },
+          canReserve && basket.has(i.id)
+            ? el('button', { class: 'btn ghost small in-basket', type: 'button', 'data-res': String(i.id), 'aria-label': `${t('depot_basket_remove')}: ${nm(i)}`, onclick: () => toBasket(i.id, false) }, '✓ ' + t('depot_in_basket'))
+            : canReserve && !out ? el('button', { class: 'btn small', type: 'button', 'data-res': String(i.id), 'aria-label': `${t('depot_basket_add')}: ${nm(i)}`, onclick: () => toBasket(i.id, true) }, t('depot_basket_add')) : '',
+          canEdit ? el('button', { class: 'btn ghost small', type: 'button', 'data-id': String(i.id), 'aria-label': `${t('edit')}: ${nm(i)}`, onclick: () => openEdit(i.id) }, t('edit')) : '') : '');
+    }
+
+    // ---- reservations: a basket of items booked together for one time window, for a troop ----
+    // how many of an item are booked at any point between from and to (ms); all overlapping bookings count, as on the server
+    const held = (id, from, to) => bookings.filter((b) => Date.parse(b.starts_at) < to && Date.parse(b.ends_at) > from)
+      .reduce((n, b) => n + b.items.filter((x) => x.item_id === id).reduce((m, x) => m + x.quantity, 0), 0);
+    const pad = (n) => String(n).padStart(2, '0');
+    const localInput = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`; // value for <input type=datetime-local>
+    const fmtWhen = (a, b) => {
+      const A = new Date(a), B = new Date(b), full = { dateStyle: 'medium', timeStyle: 'short' };
+      return A.toLocaleString(locale(), full) + ' – ' + (A.toDateString() === B.toDateString() ? B.toLocaleTimeString(locale(), { timeStyle: 'short' }) : B.toLocaleString(locale(), full));
+    };
+    const troopName = (x) => (x ? (state.lang === 'ar' ? x.name_ar : x.name_en) : '');
+    const bf = () => $('basket').elements;
+
+    // the basket survives a reload: items, window, note and (super admin) troop
+    function saveBasket() {
+      const f = bf();
+      try {
+        localStorage.setItem(basketKey, JSON.stringify({ items: [...basket], starts_at: f.starts_at.value, ends_at: f.ends_at.value, note: f.note.value, troop_id: f.troop_id.value }));
+      } catch { /* storage off or full: the basket just isn't kept */ }
+    }
+    function restoreBasket() {
+      let s = null; try { s = JSON.parse(localStorage.getItem(basketKey)); } catch { /* ignore */ }
+      (Array.isArray(s?.items) ? s.items : []).forEach(([id, q]) => { if (Number.isInteger(id)) basket.set(id, String(q)); });
+      const f = bf();
+      // default window: the next full hour, for two hours (also when the saved one is already over)
+      if (s?.starts_at && s?.ends_at && Date.parse(s.ends_at) > Date.now()) { f.starts_at.value = s.starts_at; f.ends_at.value = s.ends_at; }
+      else defaultWindow();
+      f.note.value = s?.note || '';
+      return s?.troop_id || null;
+    }
+    function defaultWindow() {
+      const start = new Date(); start.setMinutes(0, 0, 0); start.setHours(start.getHours() + 1);
+      bf().starts_at.value = localInput(start); bf().ends_at.value = localInput(new Date(start.getTime() + 2 * 3600000));
+    }
+    // add an item (one of it; the quantity is set in the basket) or take it out
+    function toBasket(id, add) {
+      if (add) { if (basket.size === 0 && Date.parse(bf().ends_at.value) <= Date.now()) defaultWindow(); basket.set(id, basket.get(id) || '1'); }
+      else basket.delete(id);
+      msg(''); saveBasket(); drawBasket(); draw();
+      $('items').querySelector(`[data-res="${id}"]`)?.focus(); // the button changed: keep the keyboard on that row
+    }
+
+    // the basket form: who it is for, the window, one line per item (quantity, what is free in that window, remove), a note
+    function drawBasket() {
+      const show = canReserve && basket.size > 0;
+      $('basket').classList.toggle('hidden', !show);
+      $('basketN').textContent = fmt(basket.size);
+      paintPill();
+      if (!show) return;
+      // admins and mods book for their own troop; the super admin belongs to none and picks one
+      $('basketTroop').classList.toggle('hidden', roams);
+      $('troopPick').classList.toggle('hidden', !roams);
+      if (!roams) $('basketTroop').textContent = t('depot_for').replace('{troop}', troopName(troops.find((x) => x.id === myTroop)));
+      else {
+        const sel = bf().troop_id, keep = sel.value;
+        sel.replaceChildren(...troops.map((x) => el('option', { value: String(x.id) }, troopName(x))));
+        if (keep) sel.value = keep;
+      }
+      const byId = new Map(items.map((i) => [i.id, i]));
+      $('basketList').replaceChildren(...[...basket].map(([id, q]) => {
+        const i = byId.get(id);
+        const qty = el('input', { type: 'number', min: '1', step: '1', required: '', value: q, 'data-line': String(id), 'aria-label': `${t('depot_quantity')}: ${nm(i)}` });
+        qty.addEventListener('input', () => { basket.set(id, qty.value); saveBasket(); });
+        return el('li', { class: 'depot-item' },
+          el('div', { class: 'grow' }, el('b', { dir: 'auto' }, nm(i)), el('small', { class: 'depot-free', 'data-free': String(id) })),
+          qty,
+          el('button', { class: 'btn quiet small', type: 'button', 'aria-label': `${t('depot_basket_remove')}: ${nm(i)}`, onclick: () => toBasket(id, false) }, '×'));
+      }));
+      showFree();
+    }
+    // under each line: how many are free for the chosen window (red when the quantity asked is more than that)
+    function showFree() {
+      const f = bf(), from = Date.parse(f.starts_at.value), to = Date.parse(f.ends_at.value), byId = new Map(items.map((i) => [i.id, i]));
+      $('basketList').querySelectorAll('[data-free]').forEach((s) => {
+        const id = Number(s.dataset.free), i = byId.get(id), qty = $('basketList').querySelector(`[data-line="${id}"]`);
+        if (!(to > from)) { s.textContent = ''; return; }
+        const n = Math.max(0, i.quantity - held(id, from, to));
+        s.textContent = t('depot_free').replace('{n}', fmt(n));
+        s.classList.toggle('none', Number(qty.value) > n);
+        qty.max = String(Math.max(1, n));
+      });
+    }
+    $('basket').addEventListener('input', () => { saveBasket(); showFree(); });
+    $('basket').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const f = bf();
+      try {
+        await api('/api/depot/bookings', 'POST', {
+          items: [...basket].map(([id, q]) => ({ item_id: id, quantity: Number(q) })),
+          troop_id: roams ? Number(f.troop_id.value) : undefined, note: f.note.value,
+          starts_at: new Date(f.starts_at.value).toISOString(), ends_at: new Date(f.ends_at.value).toISOString() }); // local time -> exact moment
+        basket.clear(); f.note.value = ''; saveBasket(); msg(t('depot_booked'), true); await load();
+        $('resBox').scrollIntoView({ block: 'nearest' });
+      } catch (e) { fail(e); if (e.code === 'not_available' || e.code === 'not_found') await load(); } // someone else booked meanwhile: refresh what's free
+    });
+    $('basketClear').addEventListener('click', async () => {
+      if (!(await confirmBox(t('depot_basket_confirm'), t('depot_basket_clear')))) return;
+      basket.clear(); bf().note.value = ''; saveBasket(); drawBasket(); draw();
+    });
+    // the shortcut back to the basket shows while the basket has items and is scrolled out of view
+    let basketVisible = false;
+    const paintPill = () => {
+      $('basketPill').textContent = `${t('depot_basket')} (${fmt(basket.size)})`;
+      $('basketPill').classList.toggle('hidden', !canReserve || !basket.size || basketVisible);
+    };
+    if ('IntersectionObserver' in window) new IntersectionObserver(([e]) => { basketVisible = e.isIntersecting; paintPill(); }).observe($('basket'));
+    $('basketPill').addEventListener('click', (ev) => { ev.preventDefault(); $('basket').scrollIntoView({ block: 'start' }); bf().starts_at.focus({ preventScroll: true }); });
+
+    // the list under the inventory: every booking that isn't over yet, headed by the troop it is for (the one running now is marked)
+    function bookingRow(b, past) {
+        const byId = new Map(items.map((i) => [i.id, i])), now = Date.now(), sep = state.lang === 'ar' ? '، ' : ', ';
+        const live = !past && Date.parse(b.starts_at) <= now;
+        const what = b.items.map((x) => `${byId.has(x.item_id) ? nm(byId.get(x.item_id)) : '—'} × ${fmt(x.quantity)}`).join(sep);
+        return el('li', { class: 'depot-item' + (b.troop_id === myTroop ? ' own' : '') + (past ? ' over' : '') },
+          el('div', { class: 'grow' },
+            el('b', { dir: 'auto' }, troopName({ name_ar: b.troop_name_ar, name_en: b.troop_name_en })), live ? el('span', { class: 'depot-live' }, t('depot_res_active')) : '',
+            el('span', { class: 'depot-what', dir: 'auto' }, what),
+            el('small', { class: 'depot-notes' }, fmtWhen(b.starts_at, b.ends_at)),
+            el('small', { class: 'depot-notes', dir: 'auto' }, [t('depot_by').replace('{name}', b.leader_name), b.note].filter(Boolean).join(' — '))),
+          b.can_cancel ? el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
+            if (!(await confirmBox(t('depot_res_confirm'), t('depot_res_cancel')))) return;
+            try { await api('/api/depot/bookings/' + b.id, 'DELETE'); msg(t('saved'), true); await load(); } catch (e) { fail(e); }
+          } }, t('depot_res_cancel')) : '');
+    }
+    function drawReservations() {
+      $('resBox').classList.toggle('hidden', !canReserve);
+      $('pastBox').classList.toggle('hidden', !canReserve);
+      if (!canReserve) return;
+      $('resList').replaceChildren(...(bookings.length ? bookings.map((b) => bookingRow(b, false)) : [el('li', { class: 'empty' }, t('depot_res_none'))]));
+      drawPast();
+    }
+    // the history: loaded when the section is opened, and again after every reload of the page data while it is open
+    let past = null;
+    function drawPast() {
+      if (past) $('pastList').replaceChildren(...(past.length ? past.map((b) => bookingRow(b, true)) : [el('li', { class: 'empty' }, t('depot_past_none'))]));
+    }
+    async function loadPast() {
+      if (!$('pastBox').open) return;
+      try { past = await api('/api/depot/bookings?past=1'); drawPast(); } catch (e) { fail(e); }
+    }
+    $('pastBox').addEventListener('toggle', loadPast);
+    // the open row (admins and the super admin): the same fields as adding, with Save / Cancel, and Delete set apart at the end
+    function editRow(i) {
+      const draft = drafts.get(i.id) || {};
+      const field = (key, name, value, attrs) => el('label', {}, el('span', {}, t(key)),
+        el('input', { name, value: (name in draft ? draft[name] : value) ?? '', ...attrs }));
+      const form = el('form', { class: 'depot-form' },
+        el('div', { class: 'grid2' },
+          field('name_ar', 'name_ar', i.name_ar, { type: 'text', maxlength: '80', dir: 'rtl' }),
+          field('name_en', 'name_en', i.name_en, { type: 'text', maxlength: '80', dir: 'ltr' })),
+        el('div', { class: 'grid2 qty' },
+          field('depot_quantity', 'quantity', i.quantity, { type: 'number', min: '0', max: '1000000', step: '1', required: '' }),
+          field('depot_notes', 'notes', i.notes, { type: 'text', maxlength: '500' })),
+        el('div', { class: 'depot-actions' },
+          el('button', { class: 'btn', type: 'submit' }, t('save')),
+          el('button', { class: 'btn ghost', type: 'button', onclick: closeEdit }, t('cancel')),
+          el('button', { class: 'btn quiet', type: 'button', onclick: async () => {
+            if (!(await confirmBox(t('depot_confirm_delete')))) return;
+            try { await api('/api/depot/' + i.id, 'DELETE'); drafts.delete(i.id); editing = null; msg(t('saved'), true); await load(); } catch (e) { fail(e); }
+          } }, t('delete'))));
+      form.addEventListener('input', () => drafts.set(i.id, Object.fromEntries(new FormData(form))));
+      form.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') closeEdit(); });
+      form.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        try { await api('/api/depot/' + i.id, 'PUT', Object.fromEntries(new FormData(form))); drafts.delete(i.id); editing = null; msg(t('saved'), true); await load(); }
+        catch (e) { fail(e); }
+      });
+      return el('li', { class: 'depot-item editing' }, form);
+    }
+    function openEdit(id) { editing = id; msg(''); draw(); $('items').querySelector('.editing input')?.focus(); }
+    function closeEdit() {
+      const id = editing; editing = null; if (id != null) drafts.delete(id); draw(); // cancel throws the typed changes away
+      $('items').querySelector(`[data-id="${id}"]`)?.focus(); // back on that row's Edit button
+    }
 
     function draw() {
       const q = norm($('q').value.trim());
-      const shown = items.filter((i) => !q || [i.name_en, i.name_ar, i.notes].some((v) => norm(v).includes(q)));
-      $('count').textContent = fmt(items.length);
+      const shown = items.filter((i) => i.id === editing || !q || [i.name_en, i.name_ar, i.notes].some((v) => norm(v).includes(q)));
+      // "Items listed: 12", or "3 of 12" while searching
+      $('count').replaceChildren(el('span', {}, t('depot_total')),
+        el('b', {}, q ? t('depot_of').replace('{n}', fmt(shown.length)).replace('{m}', fmt(items.length)) : fmt(items.length)));
+      $('count').classList.toggle('hidden', !items.length);
+      drawReservations();
       if (!shown.length) return $('items').replaceChildren(el('li', { class: 'empty' }, t(items.length ? 'depot_no_results' : 'depot_empty')));
-      $('items').replaceChildren(...shown.map((i) => {
-        if (!canEdit) return el('li', {}, el('div', { class: 'grow' }, el('b', {}, nm(i)), i.notes ? el('small', { style: 'display:block;opacity:.75' }, i.notes) : ''), el('span', { class: 'depot-qty' }, fmt(i.quantity)));
-        const f = (n, v, type = 'text', extra = {}) => el('input', { name: n, type, value: v ?? '', 'aria-label': t(extra.label), ...extra.attrs });
-        const form = el('form', { class: 'depot-edit' },
-          f('name_en', i.name_en, 'text', { label: 'name_en', attrs: { maxlength: '80', dir: 'ltr' } }),
-          f('name_ar', i.name_ar, 'text', { label: 'name_ar', attrs: { maxlength: '80', dir: 'rtl' } }),
-          f('quantity', i.quantity, 'number', { label: 'depot_quantity', attrs: { min: '0', max: '1000000', step: '1', required: '' } }),
-          f('notes', i.notes, 'text', { label: 'depot_notes', attrs: { maxlength: '500' } }),
-          el('button', { class: 'btn small', type: 'submit' }, t('save')));
-        form.addEventListener('submit', async (ev) => {
-          ev.preventDefault();
-          const d = Object.fromEntries(new FormData(form));
-          try { await api('/api/depot/' + i.id, 'PUT', d); msg(t('saved'), true); await load(); } catch (e) { fail(e); }
-        });
-        return el('li', {}, form, el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
-          if (!(await confirmBox(t('depot_confirm_delete')))) return;
-          try { await api('/api/depot/' + i.id, 'DELETE'); await load(); } catch (e) { fail(e); }
-        } }, t('delete')));
-      }));
+      $('items').replaceChildren(...shown.map((i) => (i.id === editing ? editRow(i) : itemRow(i))));
     }
-    async function load() { items = await api('/api/depot'); draw(); }
+    async function load() {
+      [items, bookings] = await Promise.all([api('/api/depot'), canReserve ? api('/api/depot/bookings') : []]);
+      const gone = [...basket.keys()].filter((id) => !items.some((i) => i.id === id)); // removed from the depot meanwhile
+      if (gone.length) { gone.forEach((id) => basket.delete(id)); saveBasket(); }
+      drawBasket(); draw(); loadPast();
+    }
     $('q').addEventListener('input', frame(draw));
+
+    // adding: one button opens the form, which closes again after adding or on Cancel
+    const showAdd = (open) => {
+      $('addForm').classList.toggle('hidden', !open); $('addBtn').setAttribute('aria-expanded', String(open));
+      if (open) $('addForm').elements.name_ar.focus(); else { $('addForm').reset(); $('addBtn').focus(); }
+    };
+    $('addBtn').addEventListener('click', () => showAdd($('addForm').classList.contains('hidden')));
+    $('addCancel').addEventListener('click', () => showAdd(false));
+    $('addForm').addEventListener('keydown', (ev) => { if (ev.key === 'Escape') showAdd(false); });
     $('addForm').addEventListener('submit', async (ev) => {
       ev.preventDefault();
-      try { await api('/api/depot', 'POST', Object.fromEntries(new FormData(ev.target))); ev.target.reset(); ev.target.elements.quantity.value = 1; msg(t('saved'), true); await load(); } catch (e) { fail(e); }
+      try {
+        const r = await api('/api/depot', 'POST', Object.fromEntries(new FormData(ev.target)));
+        fresh = r.id; showAdd(false); msg(t('saved'), true); await load();
+        $('items').querySelector('.fresh')?.scrollIntoView({ block: 'nearest' });
+        fresh = null; // highlighted once, not again on the next redraw
+      } catch (e) { fail(e); }
     });
-    document.addEventListener('langchange', draw);
+    document.addEventListener('langchange', () => { drawBasket(); draw(); });
     (async () => {
       await initLang();
       const me = await getMe(); // null for a visitor: read-only
-      if (me) { isSuper = me.role === 'super_admin'; canEdit = isSuper || me.role === 'admin'; }
-      $('addForm').classList.toggle('hidden', !isSuper);
+      if (me) { isSuper = me.role === 'super_admin'; roams = isSuper || me.role === 'leader'; canEdit = roams || me.role === 'admin'; canReserve = true; myTroop = me.troop_id; basketKey = 'depot_basket:' + me.username; try { localStorage.removeItem('depot_basket'); } catch { /* ignore */ } } // the old shared key (build 35) is dropped
+      $('addBtn').classList.toggle('hidden', !isSuper);
       $('editNote').classList.toggle('hidden', canEdit);
+      if (canReserve) {
+        const savedTroop = restoreBasket();
+        try { troops = await api('/api/troops'); } catch { troops = []; }
+        if (roams) { // the troop from the saved basket, else the one last used in the leader area, else (a leader) their own, else the first
+          let last = null; try { last = localStorage.getItem('leaderTroop'); } catch { /* ignore */ }
+          const pick = [savedTroop, last, myTroop].find((v) => troops.some((x) => String(x.id) === String(v)));
+          bf().troop_id.replaceChildren(...troops.map((x) => el('option', { value: String(x.id) }, troopName(x))));
+          if (pick) bf().troop_id.value = String(pick);
+        }
+      }
       try { await load(); } catch (e) { fail(e); }
     })();
-;
   </script>
 </body>
 </html>

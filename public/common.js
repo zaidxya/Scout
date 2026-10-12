@@ -105,17 +105,39 @@ function initLang() {
   return ready;
 }
 
+// A form can't be sent again while its requests are still running (double-clicking "Award" used to give the XP twice).
+// The form stays locked until every request has finished, including the reloads its handler starts after saving.
+let pending = 0;
+const busyForms = new Set();
+const releaseForms = () => setTimeout(() => {
+  if (pending) return;
+  busyForms.forEach((f) => { delete f.dataset.busy; f.querySelectorAll('[type=submit]').forEach((b) => { b.disabled = false; }); });
+  busyForms.clear();
+}, 0);
+document.addEventListener('submit', (e) => {
+  const f = e.target;
+  if (f.dataset.busy) { e.preventDefault(); e.stopImmediatePropagation(); return; }
+  f.dataset.busy = '1'; busyForms.add(f);
+  f.querySelectorAll('[type=submit]').forEach((b) => { b.disabled = true; });
+  releaseForms(); // a handler that sends nothing is released straight away
+}, true);
+
 async function api(url, method = 'GET', body) {
-  const r = await fetch(url, {
-    method,
-    credentials: 'same-origin',
-    // state.troop is set in the leader area only: it tells the server which troop the super admin is working in
-    headers: { 'Content-Type': 'application/json', ...(state.troop ? { 'X-Troop': String(state.troop) } : {}) },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const data = await r.json().catch(() => ({}));
-  if (!r.ok) throw Object.assign(new Error(data.error || 'server'), { status: r.status, code: data.error || 'server' });
-  return data;
+  pending++;
+  try {
+    const r = await fetch(url, {
+      method,
+      credentials: 'same-origin',
+      // state.troop is set in the leader area only: it tells the server which troop the super admin is working in
+      headers: { 'Content-Type': 'application/json', ...(state.troop ? { 'X-Troop': String(state.troop) } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) throw Object.assign(new Error(data.error || 'server'), { status: r.status, code: data.error || 'server' });
+    return data;
+  } finally {
+    if (!--pending) releaseForms();
+  }
 }
 
 function el(tag, attrs = {}, ...kids) {
@@ -133,7 +155,8 @@ const locale = () => (state.lang === 'ar' ? 'ar-EG' : 'en');
 const fmt = (n) => Number(n).toLocaleString(locale());
 // activity day arrives as plain YYYY-MM-DD; format it in UTC so it never shifts by timezone
 const fmtDay = (d) => new Date(d).toLocaleDateString(locale(), { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' });
-const errText = (e) => t('err_' + (e.code || 'server'));
+// an error code without a translation (e.g. a network failure) shows the general "something went wrong" text instead of a raw key
+const errText = (e) => { const k = 'err_' + (e.code || 'server'); const s = tu(k); return s && s !== k ? s : t('err_server'); }; // tu: some errors name the patrol word
 // +5 / -5 (a minus sign for losses, a plus sign for gains)
 const signed = (n) => (n > 0 ? '+' : '') + fmt(n);
 const roleName = (r) => (state.lang === 'ar' ? r.name_ar : r.name_en);
@@ -212,7 +235,10 @@ function confirmBox(message, okLabel) {
         el('button', { class: 'btn danger', type: 'button', 'data-r': '1' }, okLabel || t('delete'))));
     const done = (v) => { dlg.close(); dlg.remove(); resolve(v); };
     dlg.addEventListener('click', (e) => {
-      if (e.target === dlg) done(false); // click on the dimmed backdrop
+      if (e.target === dlg) { // the dialog itself: either its padding or the dimmed backdrop around it; only the backdrop cancels
+        const b = dlg.getBoundingClientRect();
+        if (e.clientX < b.left || e.clientX > b.right || e.clientY < b.top || e.clientY > b.bottom) done(false);
+      }
       else if (e.target.dataset && e.target.dataset.r) done(e.target.dataset.r === '1');
     });
     dlg.addEventListener('cancel', (e) => { e.preventDefault(); done(false); }); // Esc key

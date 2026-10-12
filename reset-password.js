@@ -11,9 +11,10 @@ const pool = require('./db');
     console.error('Usage: node reset-password.js <username> <new-password (8+ characters)>');
     process.exit(1);
   }
-  const r = await pool.query('UPDATE leaders SET password_hash = $1 WHERE username = $2 RETURNING username, role',
+  // raising session_v signs the account out on every device (needs the column the app adds on startup, so start the new version once first)
+  const r = await pool.query('UPDATE leaders SET password_hash = $1, session_v = session_v + 1 WHERE username = $2 RETURNING username, role',
     [await bcrypt.hash(password, 12), username.trim().toLowerCase()]);
   if (!r.rowCount) { console.error(`No account named "${username}".`); process.exit(1); }
-  console.log(`Password reset for "${r.rows[0].username}" (${r.rows[0].role}). Existing logins stay valid for up to 12 hours.`);
+  console.log(`Password reset for "${r.rows[0].username}" (${r.rows[0].role}). The account is signed out everywhere and can sign in with the new password.`);
   await pool.end();
 })().catch((e) => { console.error(e.message); process.exit(1); });

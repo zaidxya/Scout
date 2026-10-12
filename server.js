@@ -16,6 +16,12 @@ if (!SECRET || !process.env.DATABASE_URL) {
 
 const app = express();
 app.set('trust proxy', 1);
+app.disable('x-powered-by');
+// basic browser protections: no framing of the site (clickjacking), no MIME sniffing, no full URLs leaked to other sites
+app.use((req, res, next) => {
+  res.set({ 'X-Frame-Options': 'DENY', 'X-Content-Type-Options': 'nosniff', 'Referrer-Policy': 'same-origin' });
+  next();
+});
 app.get('/healthz', (req, res) => res.type('text').send('ok')); // for uptime pingers; no database, no logging
 
 // one log line per page/API request (shows up in Render's Logs tab); skips static assets and photos
@@ -36,7 +42,8 @@ app.use(express.static(path.join(__dirname, 'public'), {
 const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 const bad = (res, code = 'invalid_input', status = 400) => res.status(status).json({ error: code });
 const invalid = () => Object.assign(new Error('invalid_input'), { status: 400 });
-const intId = (v) => { const n = parseInt(v, 10); if (!Number.isInteger(n)) throw invalid(); return n; };
+// ids: whole positive numbers that fit a Postgres INT ("12abc" or 99999999999 is refused here instead of failing in the database)
+const intId = (v) => { const s = String(v ?? '').trim(), n = Number(s); if (!/^\d{1,10}$/.test(s) || n < 1 || n > 2147483647) throw invalid(); return n; };
 const text = (v, max) => { const s = String(v ?? '').trim(); if (s.length > max) throw invalid(); return s || null; };
 // phone numbers: digits only (Arabic-Indic digits are converted; anything else is dropped)
 const phone = (v) => {
@@ -47,7 +54,9 @@ const phone = (v) => {
 const date = (v) => {
   const s = String(v ?? '').trim();
   if (!s) return null;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(s) || isNaN(Date.parse(s))) throw invalid();
+  // a real calendar day: 2025-02-31 is refused (Date.parse rolls it over to March, and Postgres would then fail with a 500)
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(s) && new Date(s + 'T00:00:00Z');
+  if (!d || isNaN(d) || d.toISOString().slice(0, 10) !== s) throw invalid();
   return s;
 };
 
@@ -72,70 +81,41 @@ const troopLook = async (troopId) => {
 const brandOf = (b) => [text(b?.brand_en, 40), text(b?.brand_ar, 40)];
 const themeOf = (b) => { const k = b?.theme ?? 'default'; if (!THEME_KEYS.includes(k)) throw invalid(); return k; };
 
-// ---- permissions: what a role can grant. Every account is an admin (or the super admin); roles held by an account's scout profile
-// can switch on more. view_log: see the leader activity log. manage_accounts: add accounts, delete them, reset their passwords.
-// The super admin has all of them. Nobody can hand out a permission they don't hold themselves (see grantable()).
-const PERMS = ['view_log', 'manage_accounts'];
-const PERMS_OF_SCOUT_SQL = `SELECT DISTINCT unnest(lb.permissions) AS p FROM scout_labels sl JOIN labels lb ON lb.id = sl.label_id AND lb.kind = 'role' WHERE sl.scout_id = `;
-const PERMS_OF_ACCOUNT_SQL = PERMS_OF_SCOUT_SQL + '(SELECT scout_id FROM leaders WHERE id = $1)';
-// rows: the permissions given by the roles on the account's scout profile
-function permsFrom(l, rows) {
-  if (l.role === 'super_admin') return new Set(PERMS);
-  if (l.role === 'mod') return new Set(); // a mod (مسؤول) only works with members and their activity: no permissions, whatever roles its profile holds
-  return new Set(rows.map((r) => r.p).filter((p) => PERMS.includes(p)));
-}
-async function permsOf(l) {
-  if (l.role === 'super_admin' || l.role === 'mod' || !l.scout_id) return permsFrom(l, []);
-  return permsFrom(l, (await pool.query(PERMS_OF_SCOUT_SQL + '$1', [l.scout_id])).rows);
-}
-// a list of permission names from a request: only known ones, no duplicates, and only ones the actor holds
-const permList = (v) => {
-  if (v == null || v === '') return [];
-  if (!Array.isArray(v) || v.some((p) => !PERMS.includes(p))) throw invalid();
-  return [...new Set(v)];
-};
-const grantable = (req, perms) => perms.every((p) => req.perms.has(p));
-const requirePerm = (p) => (req, res, next) => (req.perms.has(p) ? next() : bad(res, 'forbidden', 403));
-
 // ---- auth ----
 const requireLeader = wrap(async (req, res, next) => {
   let p;
   try { p = jwt.verify(req.cookies.token, SECRET); } catch { return bad(res, 'unauthorized', 401); }
-  // the account and the permissions its scout profile's roles give are fetched together (one round trip instead of two)
-  const [who, granted] = await Promise.all([
-    pool.query('SELECT id, username, role, troop_id, scout_id FROM leaders WHERE id = $1', [p.id]),
-    pool.query(PERMS_OF_ACCOUNT_SQL, [p.id]),
-  ]);
-  if (!who.rows[0]) return bad(res, 'unauthorized', 401); // e.g. leader was deleted
+  const who = await pool.query('SELECT id, username, role, troop_id, scout_id, session_v FROM leaders WHERE id = $1', [p.id]);
+  // the leader was deleted, or their password was changed or reset after this session started (that ends every older session)
+  if (!who.rows[0] || who.rows[0].session_v !== (p.v ?? 0)) return bad(res, 'unauthorized', 401);
   req.leader = who.rows[0];
-  req.perms = permsFrom(req.leader, granted.rows);
-  // the troop this request works on: a leader's own troop; the super admin is not bound to one and picks it
-  // with the X-Troop header (an unknown or missing value falls back to the first troop)
+  // the troop this request works on: an admin's or mod's own troop. The super admin (no troop of their own) and leaders (a home troop) can switch:
+  // they pick it with the X-Troop header (an unknown or missing value falls back to the leader's home troop, or to the first troop for the super admin)
   req.troop = req.leader.troop_id;
-  if (req.leader.role === 'super_admin') {
+  if (roams(req.leader)) {
     const all = await troopList();
-    req.troop = (all.find((x) => x.id === parseInt(req.get('x-troop'), 10)) || all[0]).id;
+    req.troop = (all.find((x) => x.id === parseInt(req.get('x-troop'), 10)) || all.find((x) => x.id === req.leader.troop_id) || all[0]).id;
   }
   next();
 });
-// only the super admin and admins may manage leader accounts
-const isAdmin = (l) => l.role === 'super_admin' || l.role === 'admin';
+// account levels: super_admin (everything), admin (their own troop, incl. roles/tags), leader (like an admin but can switch troops, and has no roles/tags),
+// mod (members and their activity only). Only the super admin manages troops and accounts and sees the activity log.
+// the super admin and leaders work in any troop they switch to; admins and mods only in their own
+const roams = (l) => l.role === 'super_admin' || l.role === 'leader';
+// may edit the depot items and cancel their troop's reservations
+const isAdmin = (l) => l.role === 'super_admin' || l.role === 'admin' || l.role === 'leader';
 // a mod (مسؤول) works with the members, their activity and the patrols: the rest of the troop's setup (activities, roles/tags and who holds them) is closed to it
 const requireNotMod = (req, res, next) => (req.leader.role === 'mod' ? bad(res, 'forbidden', 403) : next());
 const requireAdmin = (req, res, next) => (isAdmin(req.leader) ? next() : bad(res, 'forbidden', 403));
-// the super admin alone: the troops themselves
+// roles and tags: admins and the super admin (not mods, not leaders)
+const requireLabelEditor = (req, res, next) => (req.leader.role === 'super_admin' || req.leader.role === 'admin' ? next() : bad(res, 'forbidden', 403));
+// the super admin alone: the troops, the accounts and the activity log
 const isSuper = (l) => l.role === 'super_admin';
 const requireSuper = (req, res, next) => (isSuper(req.leader) ? next() : bad(res, 'forbidden', 403));
 // which troops' scouts a leader may touch: their own troop, or every troop (null) for the super admin
-const troopScope = (l) => (isSuper(l) ? null : l.troop_id);
-// may the requester delete / reset the password of `target`? Never the super admin, never themselves. The super admin may manage anyone;
-// an account with the manage_accounts permission only accounts of its own troop that hold no permission it lacks (so nobody can take over a stronger account)
-async function canManage(req, target) {
-  if (target.id === req.leader.id || target.role === 'super_admin') return false;
-  if (isSuper(req.leader)) return true;
-  if (!req.perms.has('manage_accounts') || target.troop_id !== req.leader.troop_id) return false;
-  return grantable(req, [...(await permsOf(target))]);
-}
+const troopScope = (l) => (roams(l) ? null : l.troop_id);
+// may the requester (the super admin) delete / reset the password of `target`? Never the super admin, never themselves.
+const canManage = (req, target) => target.id !== req.leader.id && target.role !== 'super_admin';
 
 // ---- audit log: who did what (never stores passwords or private scout details) ----
 function audit(leader, action, meta, troopId) {
@@ -147,7 +127,7 @@ function audit(leader, action, meta, troopId) {
 async function scoutFor(req, id) {
   const { rows } = await pool.query('SELECT id, name, troop_id FROM scouts WHERE id = $1', [id]);
   const s = rows[0];
-  return s && (isSuper(req.leader) || s.troop_id === req.leader.troop_id) ? s : null;
+  return s && (roams(req.leader) || s.troop_id === req.leader.troop_id) ? s : null;
 }
 
 async function tx(fn) {
@@ -157,23 +137,28 @@ async function tx(fn) {
   finally { c.release(); }
 }
 
+// failed sign-ins per IP: 10 per 15 minutes. Successful ones don't count, so leaders sharing one connection aren't locked out by normal use
 const attempts = new Map();
 setInterval(() => { const now = Date.now(); for (const [ip, a] of attempts) if (a.reset < now) attempts.delete(ip); }, 10 * 60 * 1000).unref(); // forget finished windows
 function loginLimiter(req, res, next) {
+  const a = attempts.get(req.ip);
+  if (a && a.reset >= Date.now() && a.n >= 10) return bad(res, 'too_many', 429);
+  next();
+}
+function loginFailed(ip) {
   const now = Date.now();
-  let a = attempts.get(req.ip);
+  let a = attempts.get(ip);
   if (!a || a.reset < now) a = { n: 0, reset: now + 15 * 60 * 1000 };
   a.n += 1;
-  attempts.set(req.ip, a);
-  if (a.n > 10) return bad(res, 'too_many', 429);
-  next();
+  attempts.set(ip, a);
 }
 
 // sessions last until the user signs out: a very long token plus a persistent cookie (browsers cap cookies at ~400 days),
-// renewed every time the session is checked so an account that keeps visiting never expires
+// renewed every time the session is checked so an account that keeps visiting never expires.
+// v is the account's session_v: changing or resetting the password raises it, which ends every session signed with the old value
 const SESSION_MS = 400 * 24 * 60 * 60 * 1000;
-function setSession(res, leaderId) {
-  const token = jwt.sign({ id: leaderId }, SECRET, { expiresIn: '3650d' });
+function setSession(res, leader) {
+  const token = jwt.sign({ id: leader.id, v: leader.session_v ?? 0 }, SECRET, { expiresIn: '3650d' });
   res.cookie('token', token, { httpOnly: true, sameSite: 'lax', secure: process.env.NODE_ENV === 'production', maxAge: SESSION_MS });
 }
 
@@ -183,13 +168,13 @@ app.post('/api/login', loginLimiter, wrap(async (req, res) => {
   const { rows } = await pool.query('SELECT * FROM leaders WHERE username = $1', [username.trim().toLowerCase()]);
   const leader = rows[0];
   if (!leader || !(await bcrypt.compare(password, leader.password_hash))) {
+    loginFailed(req.ip);
     console.log(`Failed login for "${username.slice(0, 40)}" from ${req.ip}`);
     return bad(res, 'invalid_login', 401);
   }
   audit(leader, 'login');
-  setSession(res, leader.id);
-  const [display_name, perms] = await Promise.all([displayNameOf(leader), permsOf(leader)]);
-  res.json({ username: leader.username, display_name, role: leader.role, troop_id: leader.troop_id, perms: [...perms], ...(await troopLook(leader.troop_id)) });
+  setSession(res, leader);
+  res.json({ username: leader.username, display_name: await displayNameOf(leader), role: leader.role, troop_id: leader.troop_id, ...(await troopLook(leader.troop_id)) });
 }));
 
 app.post('/api/logout', wrap(async (req, res) => {
@@ -203,8 +188,8 @@ app.post('/api/logout', wrap(async (req, res) => {
 }));
 const displayNameOf = async (l) => (l.scout_id ? (await pool.query('SELECT name FROM scouts WHERE id = $1', [l.scout_id])).rows[0]?.name : null) || l.username; // the name on the account's scout profile
 app.get('/api/me', requireLeader, wrap(async (req, res) => {
-  setSession(res, req.leader.id);
-  res.json({ username: req.leader.username, display_name: await displayNameOf(req.leader), role: req.leader.role, troop_id: req.leader.troop_id, perms: [...req.perms], ...(await troopLook(req.leader.troop_id)) });
+  setSession(res, req.leader);
+  res.json({ username: req.leader.username, display_name: await displayNameOf(req.leader), role: req.leader.role, troop_id: req.leader.troop_id, ...(await troopLook(req.leader.troop_id)) });
 }));
 
 // own account: change the username and/or the password (the current password is always required; a new password must be typed twice)
@@ -219,8 +204,10 @@ app.put('/api/me/account', requireLeader, wrap(async (req, res) => {
   if (typeof current !== 'string' || !(await bcrypt.compare(current, rows[0].password_hash))) return bad(res, 'wrong_password', 403);
   const renamed = want !== req.leader.username;
   try {
-    await pool.query('UPDATE leaders SET username = $1, password_hash = COALESCE($2, password_hash) WHERE id = $3',
-      [want, hasNext ? await bcrypt.hash(next, 12) : null, req.leader.id]);
+    // a new password signs the account out everywhere else; this session gets a fresh cookie
+    const r = await pool.query('UPDATE leaders SET username = $1, password_hash = COALESCE($2, password_hash), session_v = session_v + $4 WHERE id = $3 RETURNING id, session_v',
+      [want, hasNext ? await bcrypt.hash(next, 12) : null, req.leader.id, hasNext ? 1 : 0]);
+    if (hasNext) setSession(res, r.rows[0]);
   } catch (e) {
     if (e.code === '23505') return bad(res, 'username_taken', 409);
     throw e;
@@ -285,7 +272,7 @@ app.delete('/api/troops/:id', requireLeader, requireSuper, wrap(async (req, res)
 
 // is the request from a signed-in leader account? (public routes use it to show deactivated scouts to leaders only)
 async function isStaff(req) {
-  try { const p = jwt.verify(req.cookies.token, SECRET); return (await pool.query('SELECT 1 FROM leaders WHERE id = $1', [p.id])).rowCount > 0; } catch { return false; }
+  try { const p = jwt.verify(req.cookies.token, SECRET); return (await pool.query('SELECT 1 FROM leaders WHERE id = $1 AND session_v = $2', [p.id, p.v ?? 0])).rowCount > 0; } catch { return false; }
 }
 // ---- public: dashboard data for one troop (display name, photo, roles, XP, activity) ----
 app.get('/api/scouts', wrap(async (req, res) => {
@@ -314,8 +301,9 @@ app.get('/api/scouts/:id', wrap(async (req, res) => {
 }));
 
 app.get('/api/scouts/:id/photo', wrap(async (req, res) => {
-  const { rows } = await pool.query('SELECT photo FROM scouts WHERE id = $1', [intId(req.params.id)]);
+  const { rows } = await pool.query('SELECT photo, active FROM scouts WHERE id = $1', [intId(req.params.id)]);
   if (!rows[0] || !rows[0].photo) return res.sendStatus(404);
+  if (!rows[0].active && !(await isStaff(req))) return res.sendStatus(404); // like the rest of a deactivated scout's page: leaders only
   res.set('Content-Type', 'image/jpeg').set('Cache-Control', 'public, max-age=31536000, immutable').send(rows[0].photo);
 }));
 
@@ -402,33 +390,23 @@ app.put('/api/scouts/:id/patrol', requireLeader, wrap(async (req, res) => {
 
 // ---- leader: roles and tags (each troop has its own set; everyone reads their troop's, only list editors change them) ----
 app.get('/api/labels', requireLeader, wrap(async (req, res) => {
-  const { rows } = await pool.query('SELECT id, kind, name_en, name_ar, color, priority, permissions FROM labels WHERE troop_id = $1 ORDER BY kind, priority DESC, name_en, id', [req.troop]);
+  const { rows } = await pool.query('SELECT id, kind, name_en, name_ar, color, priority FROM labels WHERE troop_id = $1 ORDER BY kind, priority DESC, name_en, id', [req.troop]);
   res.json(rows);
 }));
 
-app.post('/api/labels', requireLeader, requireNotMod, wrap(async (req, res) => {
+app.post('/api/labels', requireLeader, requireLabelEditor, wrap(async (req, res) => {
   const kind = req.body?.kind;
   const en = text(req.body?.name_en, 40), ar = text(req.body?.name_ar, 40);
   if (!['role', 'tag'].includes(kind) || (!en && !ar)) throw invalid();
-  const perms = kind === 'role' ? permList(req.body?.permissions) : []; // only roles carry permissions
-  if (!grantable(req, perms)) return bad(res, 'forbidden', 403); // you can only give a role permissions you hold yourself
   const { rows } = await pool.query(
-    'INSERT INTO labels (kind, name_en, name_ar, color, priority, permissions, troop_id) VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, kind, name_en, name_ar, color, priority, permissions',
-    [kind, en || ar, ar || en, hexColor(req.body?.color), kind === 'role' ? priority(req.body?.priority) : 0, perms, req.troop]);
+    'INSERT INTO labels (kind, name_en, name_ar, color, priority, troop_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, kind, name_en, name_ar, color, priority',
+    [kind, en || ar, ar || en, hexColor(req.body?.color), kind === 'role' ? priority(req.body?.priority) : 0, req.troop]);
   audit(req.leader, 'label_add', { name: `${en || ar} (${kind})` }, req.troop);
   res.status(201).json(rows[0]);
 }));
 
-app.put('/api/labels/:id', requireLeader, requireNotMod, wrap(async (req, res) => {
+app.put('/api/labels/:id', requireLeader, requireLabelEditor, wrap(async (req, res) => {
   const b = req.body || {}, sets = [], vals = [];
-  if ('permissions' in b) {
-    const cur = (await pool.query("SELECT permissions FROM labels WHERE id = $1 AND troop_id = $2 AND kind = 'role'", [intId(req.params.id), req.troop])).rows[0];
-    if (!cur) return bad(res, 'not_found', 404);
-    const next = permList(b.permissions);
-    const changed = [...next.filter((p) => !cur.permissions.includes(p)), ...cur.permissions.filter((p) => !next.includes(p))];
-    if (!grantable(req, changed)) return bad(res, 'forbidden', 403); // you can only add or remove permissions you hold yourself
-    vals.push(next); sets.push(`permissions = $${vals.length}`);
-  }
   if ('color' in b) { vals.push(hexColor(b.color)); sets.push(`color = $${vals.length}`); }
   if ('priority' in b) { vals.push(priority(b.priority)); sets.push(`priority = $${vals.length}`); }
   if (!sets.length) throw invalid();
@@ -439,29 +417,20 @@ app.put('/api/labels/:id', requireLeader, requireNotMod, wrap(async (req, res) =
   res.json({ ok: true });
 }));
 
-app.delete('/api/labels/:id', requireLeader, requireNotMod, wrap(async (req, res) => {
-  const cur = (await pool.query('SELECT permissions FROM labels WHERE id = $1 AND troop_id = $2', [intId(req.params.id), req.troop])).rows[0];
-  if (cur && !grantable(req, cur.permissions)) return bad(res, 'forbidden', 403); // a role with permissions you lack stays
+app.delete('/api/labels/:id', requireLeader, requireLabelEditor, wrap(async (req, res) => {
   const { rows } = await pool.query('DELETE FROM labels WHERE id = $1 AND troop_id = $2 RETURNING name_en, kind', [intId(req.params.id), req.troop]);
   if (rows[0]) audit(req.leader, 'label_delete', { name: `${rows[0].name_en} (${rows[0].kind})` }, req.troop);
   res.json({ ok: true });
 }));
 
 // replace the full set of roles/tags of one scout
-app.put('/api/scouts/:id/labels', requireLeader, requireNotMod, wrap(async (req, res) => {
+app.put('/api/scouts/:id/labels', requireLeader, requireLabelEditor, wrap(async (req, res) => {
   const id = intId(req.params.id);
   const ids = req.body?.label_ids;
   if (!Array.isArray(ids) || ids.length > 100) throw invalid();
   const labelIds = [...new Set(ids.map(intId))];
   const sc = await scoutFor(req, id);
   if (!sc) return bad(res, 'not_found', 404);
-  // roles that carry permissions can only be given or taken away by someone who holds those permissions
-  const before = (await pool.query('SELECT label_id FROM scout_labels WHERE scout_id = $1', [id])).rows.map((r) => r.label_id);
-  const changedIds = [...labelIds.filter((x) => !before.includes(x)), ...before.filter((x) => !labelIds.includes(x))];
-  if (changedIds.length) {
-    const risky = (await pool.query("SELECT permissions FROM labels WHERE id = ANY($1::int[]) AND kind = 'role'", [changedIds])).rows;
-    if (risky.some((r) => !grantable(req, r.permissions))) return bad(res, 'forbidden', 403);
-  }
   await tx(async (c) => {
     await c.query('DELETE FROM scout_labels WHERE scout_id = $1', [id]);
     if (labelIds.length) await c.query(
@@ -488,8 +457,10 @@ const DETAIL_COLS = 'id, name, full_name, phone, join_date, address, birth_date,
 
 app.get('/api/leader/scouts/:id', requireLeader, wrap(async (req, res) => {
   const { rows } = await pool.query(`SELECT ${DETAIL_COLS}, troop_id FROM scouts WHERE id = $1`, [intId(req.params.id)]);
-  if (!rows[0] || (!isSuper(req.leader) && rows[0].troop_id !== req.leader.troop_id)) return bad(res, 'not_found', 404);
-  res.json(rows[0]);
+  if (!rows[0]) return bad(res, 'not_found', 404); // read-only, so every signed-in account may read any troop's scout (editing is still limited to the account's own troop(s))
+  // tags are leader-only: they come with the private details
+  const tags = (await pool.query("SELECT lb.id, lb.name_en, lb.name_ar, lb.color FROM scout_labels sl JOIN labels lb ON lb.id = sl.label_id AND lb.kind = 'tag' WHERE sl.scout_id = $1 ORDER BY lb.name_en, lb.id", [rows[0].id])).rows;
+  res.json({ ...rows[0], tags });
 }));
 
 app.post('/api/scouts', requireLeader, wrap(async (req, res) => {
@@ -634,25 +605,25 @@ app.delete('/api/activities/:id', requireLeader, requireNotMod, wrap(async (req,
   res.json({ ok: true });
 }));
 
-// ---- leader: manage leaders (super admin / admin only) ----
-app.get('/api/leaders', requireLeader, requirePerm('manage_accounts'), wrap(async (req, res) => {
+// ---- leader: manage accounts (super admin only) ----
+app.get('/api/leaders', requireLeader, requireSuper, wrap(async (req, res) => {
   const { rows } = await pool.query(
     `SELECT l.id, l.username, l.role, l.created_at, l.scout_id, l.troop_id, s.name AS scout_name,
             t.name_en AS troop_name_en, t.name_ar AS troop_name_ar
      FROM leaders l LEFT JOIN scouts s ON s.id = l.scout_id LEFT JOIN troops t ON t.id = l.troop_id
      WHERE l.troop_id = $1 OR ($2::boolean AND l.role = 'super_admin')
-     ORDER BY (l.role = 'super_admin') DESC, (l.role = 'admin') DESC, (l.role = 'mod') DESC, l.id`, [req.troop, isSuper(req.leader)]);
-  res.json(await Promise.all(rows.map(async (r) => ({ ...r, can_manage: await canManage(req, r) }))));
+     ORDER BY (l.role = 'super_admin') DESC, (l.role = 'admin') DESC, (l.role = 'leader') DESC, (l.role = 'mod') DESC, l.id`, [req.troop, isSuper(req.leader)]);
+  res.json(rows.map((r) => ({ ...r, can_manage: canManage(req, r) })));
 }));
 
-app.post('/api/leaders', requireLeader, requirePerm('manage_accounts'), wrap(async (req, res) => {
+app.post('/api/leaders', requireLeader, requireSuper, wrap(async (req, res) => {
   const username = String(req.body?.username || '').trim().toLowerCase();
   const password = req.body?.password;
   if (!/^[a-z0-9_.-]{3,40}$/.test(username)) throw invalid();
   if (typeof password !== 'string' || password.length < 8 || password.length > 200) return bad(res, 'weak_password');
-  // new accounts are admins (what they may do beyond the basics comes from the roles of their scout profile) or mods (members and their activity only)
+  // new accounts are admins, leaders (like an admin, but can switch troops and have no roles/tags) or mods (members and their activity only)
   const role = req.body?.role == null || req.body.role === '' ? 'admin' : req.body.role;
-  if (!['admin', 'mod'].includes(role)) throw invalid();
+  if (!['admin', 'leader', 'mod'].includes(role)) throw invalid();
   const display = text(req.body?.display_name, 60) || username;
   // a new account starts in the leaders' patrol only (automatic, see in_council); its regular patrol, if any, is set later from its scout page
   const patrolId = null;
@@ -673,31 +644,31 @@ app.post('/api/leaders', requireLeader, requirePerm('manage_accounts'), wrap(asy
   }
 }));
 
-app.delete('/api/leaders/:id', requireLeader, requirePerm('manage_accounts'), wrap(async (req, res) => {
+app.delete('/api/leaders/:id', requireLeader, requireSuper, wrap(async (req, res) => {
   const id = intId(req.params.id);
   if (id === req.leader.id) return bad(res, 'cannot_delete_self', 400);
   const t = (await pool.query('SELECT id, username, role, troop_id, scout_id FROM leaders WHERE id = $1', [id])).rows[0];
   if (!t) return res.json({ ok: true });
-  if (!(await canManage(req, t))) return bad(res, 'forbidden', 403);
+  if (!canManage(req, t)) return bad(res, 'forbidden', 403);
   await pool.query('DELETE FROM leaders WHERE id = $1', [id]);
   audit(req.leader, 'leader_delete', { name: t.username }, t.troop_id);
   res.json({ ok: true });
 }));
 
 // reset someone else's password (the super admin's own password can only be changed by the super admin or with reset-password.js)
-app.put('/api/leaders/:id/password', requireLeader, requirePerm('manage_accounts'), wrap(async (req, res) => {
+app.put('/api/leaders/:id/password', requireLeader, requireSuper, wrap(async (req, res) => {
   const id = intId(req.params.id);
   const password = req.body?.password;
   if (typeof password !== 'string' || password.length < 8 || password.length > 200) return bad(res, 'weak_password');
   const t = (await pool.query('SELECT id, username, role, troop_id, scout_id FROM leaders WHERE id = $1', [id])).rows[0];
   if (!t) return bad(res, 'not_found', 404);
-  if (!(await canManage(req, t))) return bad(res, 'forbidden', 403);
-  await pool.query('UPDATE leaders SET password_hash = $1 WHERE id = $2', [await bcrypt.hash(password, 12), id]);
+  if (!canManage(req, t)) return bad(res, 'forbidden', 403);
+  await pool.query('UPDATE leaders SET password_hash = $1, session_v = session_v + 1 WHERE id = $2', [await bcrypt.hash(password, 12), id]); // also signs them out everywhere
   audit(req.leader, 'leader_password_reset', { name: t.username }, t.troop_id);
   res.json({ ok: true });
 }));
 
-app.get('/api/audit', requireLeader, requirePerm('view_log'), wrap(async (req, res) => {
+app.get('/api/audit', requireLeader, requireSuper, wrap(async (req, res) => {
   const { rows } = await pool.query(
     `SELECT a.id, a.leader_name, a.action, a.meta, a.created_at, a.troop_id, t.name_en AS troop_name_en, t.name_ar AS troop_name_ar
      FROM audit_log a LEFT JOIN troops t ON t.id = a.troop_id
@@ -730,7 +701,83 @@ app.put('/api/depot/:id', requireLeader, requireAdmin, wrap(async (req, res) => 
 }));
 app.delete('/api/depot/:id', requireLeader, requireAdmin, wrap(async (req, res) => {
   const { rows } = await pool.query('DELETE FROM depot_items WHERE id = $1 RETURNING name_en', [intId(req.params.id)]);
+  // the item leaves every booking with it; a booking that held nothing else is removed too
+  if (rows[0]) await pool.query('DELETE FROM depot_bookings b WHERE NOT EXISTS (SELECT 1 FROM depot_booking_items bi WHERE bi.booking_id = b.id)');
   if (rows[0]) audit(req.leader, 'depot_delete', { name: rows[0].name_en }, null);
+  res.json({ ok: true });
+}));
+
+// ---- depot reservations (bookings): made for a troop. A booking is a basket of items, each with a quantity, for one time window,
+// accepted only if every item has that much free for the whole window. Admins and mods book for their own troop; the super admin
+// and leaders pick the troop. Leaders only (they show who booked). ----
+const when = (v) => { const d = new Date(String(v ?? '')); if (!v || isNaN(d)) throw invalid(); return d.toISOString(); };
+// leader_name in the list is the display name on the booker's scout profile (the username stored with the booking if the account is gone)
+// who may cancel a booking: the one who made it, the admins of its troop, and the super admin and leaders (who work in every troop)
+const canCancel = (l, b) => b.leader_id === l.id || roams(l) || (l.role === 'admin' && b.troop_id === l.troop_id);
+// the basket: [{ item_id, quantity }], the same item twice is added up; 1-100 different items
+const basketOf = (v) => {
+  if (!Array.isArray(v) || !v.length || v.length > 100) throw invalid();
+  const m = new Map();
+  for (const x of v) {
+    const id = intId(x?.item_id), q = Number(x?.quantity);
+    if (!Number.isInteger(q) || q < 1 || q > 1000000) throw invalid();
+    m.set(id, (m.get(id) || 0) + q);
+  }
+  return m;
+};
+// the item names of a booking for the activity log (both languages, so the log follows the reader's language)
+const logItems = (lines) => lines.map((x) => ({ name_en: x.name_en, name_ar: x.name_ar, quantity: x.quantity }));
+// ?past=1: the history instead (bookings that are over, latest first, up to 200); nothing in it can be cancelled
+app.get('/api/depot/bookings', requireLeader, wrap(async (req, res) => {
+  const past = req.query.past === '1';
+  const { rows } = await pool.query(
+    `SELECT b.id, b.troop_id, b.starts_at, b.ends_at, b.note, b.leader_id, COALESCE(sc.name, b.leader_name) AS leader_name,
+            t.name_en AS troop_name_en, t.name_ar AS troop_name_ar,
+            COALESCE(json_agg(json_build_object('item_id', bi.item_id, 'quantity', bi.quantity) ORDER BY bi.item_id) FILTER (WHERE bi.item_id IS NOT NULL), '[]') AS items
+     FROM depot_bookings b LEFT JOIN troops t ON t.id = b.troop_id LEFT JOIN depot_booking_items bi ON bi.booking_id = b.id
+     LEFT JOIN leaders ld ON ld.id = b.leader_id LEFT JOIN scouts sc ON sc.id = ld.scout_id
+     WHERE b.ends_at ${past ? '<=' : '>'} now() GROUP BY b.id, t.id, sc.id ORDER BY ${past ? 'b.ends_at DESC, b.id DESC LIMIT 200' : 'b.starts_at, b.id LIMIT 500'}`);
+  res.json(rows.map(({ leader_id, ...b }) => ({ ...b, mine: leader_id === req.leader.id, can_cancel: !past && canCancel(req.leader, { ...b, leader_id }) })));
+}));
+app.post('/api/depot/bookings', requireLeader, wrap(async (req, res) => {
+  const basket = basketOf(req.body?.items), ids = [...basket.keys()].sort((a, b) => a - b);
+  const start = when(req.body?.starts_at), end = when(req.body?.ends_at);
+  const s = Date.parse(start), e = Date.parse(end);
+  if (e <= s || e <= Date.now() || e - s > 60 * 86400000) throw invalid(); // ends after it starts, not over yet, at most 60 days
+  const note = text(req.body?.note, 200);
+  // the troop it is for: an admin's or mod's own troop; the super admin names one (or works in the troop picked with X-Troop)
+  let troop = req.leader.troop_id;
+  if (roams(req.leader)) { // the super admin has no troop, leaders may book for any: they name one (default: the troop they are working in)
+    troop = req.body?.troop_id == null || req.body.troop_id === '' ? req.troop : intId(req.body.troop_id);
+    if (!(await troopList()).some((x) => x.id === troop)) throw invalid();
+  }
+  const out = await tx(async (c) => {
+    // the item rows are locked (always in id order, so two baskets can't deadlock) so two bookings at the same moment can't both take the last ones
+    const items = (await c.query('SELECT id, name_en, name_ar, quantity FROM depot_items WHERE id = ANY($1::int[]) ORDER BY id FOR UPDATE', [ids])).rows;
+    if (items.length !== ids.length) return { status: 404 };
+    // everything booked in an overlapping window counts against the stock (simple and never overbooks)
+    const held = new Map((await c.query(
+      `SELECT bi.item_id, SUM(bi.quantity)::int AS n FROM depot_booking_items bi JOIN depot_bookings b ON b.id = bi.booking_id
+       WHERE bi.item_id = ANY($1::int[]) AND b.starts_at < $3 AND b.ends_at > $2 GROUP BY bi.item_id`, [ids, start, end])).rows.map((r) => [r.item_id, r.n]));
+    const short = items.map((i) => ({ item_id: i.id, available: Math.max(0, i.quantity - (held.get(i.id) || 0)) })).filter((x) => basket.get(x.item_id) > x.available);
+    if (short.length) return { status: 409, short };
+    const { rows } = await c.query('INSERT INTO depot_bookings (troop_id, starts_at, ends_at, note, leader_id, leader_name) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id',
+      [troop, start, end, note, req.leader.id, req.leader.username]);
+    await c.query('INSERT INTO depot_booking_items (booking_id, item_id, quantity) SELECT $1, unnest($2::int[]), unnest($3::int[])', [rows[0].id, ids, ids.map((id) => basket.get(id))]);
+    return { row: rows[0], lines: items.map((i) => ({ ...i, quantity: basket.get(i.id) })) };
+  });
+  if (out.status === 404) return bad(res, 'not_found', 404);
+  if (out.status === 409) return res.status(409).json({ error: 'not_available', short: out.short });
+  audit(req.leader, 'depot_book', { items: logItems(out.lines) }, troop);
+  res.status(201).json(out.row);
+}));
+app.delete('/api/depot/bookings/:id', requireLeader, wrap(async (req, res) => {
+  const b = (await pool.query('SELECT id, troop_id, leader_id FROM depot_bookings WHERE id = $1', [intId(req.params.id)])).rows[0];
+  if (!b) return res.json({ ok: true });
+  if (!canCancel(req.leader, b)) return bad(res, 'forbidden', 403);
+  const lines = (await pool.query('SELECT d.name_en, d.name_ar, bi.quantity FROM depot_booking_items bi JOIN depot_items d ON d.id = bi.item_id WHERE bi.booking_id = $1 ORDER BY d.id', [b.id])).rows;
+  await pool.query('DELETE FROM depot_bookings WHERE id = $1', [b.id]);
+  audit(req.leader, 'depot_unbook', { items: logItems(lines) }, b.troop_id);
   res.json({ ok: true });
 }));
 
@@ -821,7 +868,11 @@ app.put('/api/meetings/:id/attendance/:scoutId', requireLeader, wrap(async (req,
 }));
 
 app.use((err, req, res, next) => {
-  if (err.status) return res.status(err.status).json({ error: err.message });
+  if (err.message === 'invalid_input') return res.status(400).json({ error: 'invalid_input' });
+  // body-parser errors (broken JSON, a body over the size limit) and values Postgres refuses (22xxx: number out of range, impossible date...)
+  // are the client's mistake: answer with a code the pages can translate instead of the raw message or a 500
+  if (err.type === 'entity.too.large') return res.status(413).json({ error: 'too_large' });
+  if ((err.status >= 400 && err.status < 500) || /^22/.test(err.code || '')) return res.status(400).json({ error: 'invalid_input' });
   console.error(err);
   res.status(500).json({ error: 'server' });
 });
@@ -891,9 +942,6 @@ app.use((err, req, res, next) => {
       [(LEADER_USERNAME || '').trim().toLowerCase()]);
     if (r.rows[0]) console.log(`Promoted "${r.rows[0].username}" to super admin`);
   }
-  // the "leader" account type is gone: everyone who was a leader is now an admin
-  const demoted = await pool.query("UPDATE leaders SET role = 'admin' WHERE role = 'leader'");
-  if (demoted.rowCount) console.log(`Changed ${demoted.rowCount} leader account(s) to admin`);
   // the super admin is bound to no troop (a promoted account that used to belong to one is released); their scout profile stays where it is
   await pool.query("UPDATE leaders SET troop_id = NULL WHERE role = 'super_admin' AND troop_id IS NOT NULL");
   // make sure every leader has a scout profile (covers leaders created before this feature; the super admin's goes in the first troop)

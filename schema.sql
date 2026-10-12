@@ -111,7 +111,7 @@ DO $$ BEGIN
 END $$;
 
 -- activities and roles/tags are separate for each troop (older databases had one shared list; startup copies it per troop)
--- roles can carry permissions (view_log, manage_accounts); assigned to a role when it is created
+-- roles used to carry permissions (view_log, manage_accounts); no longer used (the account level decides), the column is kept
 ALTER TABLE labels ADD COLUMN IF NOT EXISTS permissions TEXT[] NOT NULL DEFAULT '{}';
 -- every account is an admin (the old 'leader' type was migrated); new accounts default to it
 ALTER TABLE leaders ALTER COLUMN role SET DEFAULT 'admin';
@@ -172,3 +172,44 @@ CREATE INDEX IF NOT EXISTS meeting_attendance_scout_idx ON meeting_attendance(sc
 
 -- the scout lists check for every scout whether it belongs to a leader account
 CREATE INDEX IF NOT EXISTS leaders_scout_idx ON leaders(scout_id);
+
+-- depot reservations, made for a troop: one booking holds a basket of items (each with a quantity) for one time window.
+-- An item can't be booked beyond its quantity at any time. leader_name keeps who made it after the account is gone.
+CREATE TABLE IF NOT EXISTS depot_bookings (
+  id SERIAL PRIMARY KEY,
+  troop_id INT NOT NULL REFERENCES troops(id) ON DELETE CASCADE,
+  starts_at TIMESTAMPTZ NOT NULL,
+  ends_at TIMESTAMPTZ NOT NULL,
+  note TEXT,
+  leader_id INT REFERENCES leaders(id) ON DELETE SET NULL,
+  leader_name TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CHECK (ends_at > starts_at)
+);
+CREATE INDEX IF NOT EXISTS depot_bookings_ends_idx ON depot_bookings(ends_at);
+CREATE TABLE IF NOT EXISTS depot_booking_items (
+  booking_id INT NOT NULL REFERENCES depot_bookings(id) ON DELETE CASCADE,
+  item_id INT NOT NULL REFERENCES depot_items(id) ON DELETE CASCADE,
+  quantity INT NOT NULL CHECK (quantity > 0),
+  PRIMARY KEY (booking_id, item_id)
+);
+CREATE INDEX IF NOT EXISTS depot_booking_items_item_idx ON depot_booking_items(item_id);
+-- build 34 kept one row per item (depot_reservations): each becomes a one-item booking of the troop it was made for
+-- (the super admin's had no troop: they go to the first troop), then the old table is dropped. Runs once.
+DO $$
+DECLARE r RECORD; bid INT; first_troop INT;
+BEGIN
+  IF to_regclass('depot_reservations') IS NOT NULL THEN
+    SELECT id INTO first_troop FROM troops ORDER BY id LIMIT 1;
+    FOR r IN SELECT * FROM depot_reservations ORDER BY id LOOP
+      CONTINUE WHEN COALESCE(r.troop_id, first_troop) IS NULL;
+      INSERT INTO depot_bookings (troop_id, starts_at, ends_at, note, leader_id, leader_name, created_at)
+        VALUES (COALESCE(r.troop_id, first_troop), r.starts_at, r.ends_at, r.note, r.leader_id, r.leader_name, r.created_at) RETURNING id INTO bid;
+      INSERT INTO depot_booking_items (booking_id, item_id, quantity) VALUES (bid, r.item_id, r.quantity);
+    END LOOP;
+    DROP TABLE depot_reservations;
+  END IF;
+END $$;
+
+-- session version: every login cookie carries it; changing or resetting the password raises it, which signs out all older sessions
+ALTER TABLE leaders ADD COLUMN IF NOT EXISTS session_v INT NOT NULL DEFAULT 0;

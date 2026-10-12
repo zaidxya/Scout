@@ -145,11 +145,6 @@
             <label><span data-i18n="color"></span><input name="color" type="color" value="#d3ad80" class="swatch"></label>
             <label><span data-i18n="priority"></span><input name="priority" type="number" min="0" max="1000" step="1" value="0" style="max-width:8rem"></label>
             <p class="hint" data-i18n="priority_hint"></p>
-            <fieldset id="permBox" class="perm-box">
-              <legend data-i18n="role_perms"></legend>
-              <div id="permChecks"></div>
-              <p class="hint" data-i18n="role_perms_hint"></p>
-            </fieldset>
             <button class="btn" type="submit" data-i18n="add"></button>
           </form>
         </div>
@@ -190,7 +185,7 @@
             </div>
             <p class="hint" data-i18n="pw_hint"></p>
             <p class="hint" data-unit="account_patrol_hint"></p>
-            <label><span data-i18n="account_type"></span><select name="role"><option value="admin" data-i18n="acct_admin"></option><option value="mod" data-i18n="acct_mod"></option></select></label>
+            <label><span data-i18n="account_type"></span><select name="role"><option value="admin" data-i18n="acct_admin"></option><option value="leader" data-i18n="acct_leader"></option><option value="mod" data-i18n="acct_mod"></option></select></label>
             <label><span data-i18n="display_name"></span><input name="display_name" type="text" maxlength="60"></label>
             <p class="hint" data-i18n="display_name_hint"></p>
             <button class="btn" type="submit" data-i18n="add"></button>
@@ -202,16 +197,15 @@
   <script src="/common.js"></script>
   <script>
     const $ = (id) => document.getElementById(id);
-    let scouts = [], current = null, data = null, det = null, acts = [], labels = [], patrols = [], leaders = [], troops = [], me = '', myRole = 'admin', myPerms = [], myTroop = null; // myTroop: the leader's own troop (null for the super admin, who is not bound to one)
-    const activeTroop = () => state.troop; // the troop being worked on: myTroop, or whichever one the super admin switched to
+    let scouts = [], current = null, data = null, det = null, acts = [], labels = [], patrols = [], leaders = [], troops = [], me = '', myRole = 'admin', myTroop = null; // myTroop: the account's own troop (null for the super admin, who is not bound to one)
+    const activeTroop = () => state.troop; // the troop being worked on: myTroop, or whichever one the super admin or a leader switched to
     const isSuper = () => myRole === 'super_admin';
-    // permissions: the super admin has them all; everyone else gets them from the roles on their scout profile (the server sends the list)
-    const PERMS = ['view_log', 'manage_accounts'];
-    const can = (p) => isSuper() || myPerms.includes(p);
+    const roams = () => myRole === 'super_admin' || myRole === 'leader'; // can switch between troops (leaders have a home troop, the super admin none)
     const TABS = ['scouts', 'activities', 'patrols', 'attendance', 'labels', 'troops', 'leaders', 'log'];
-    // tabs that need more than the basics: the troops are for the super admin only, the other two need a permission (given through a role)
     const isMod = () => myRole === 'mod'; // a mod (مسؤول) has the members, their activity and the patrols (and its own password)
-    const tabAllowed = (n) => isMod() ? (n === 'scouts' || n === 'patrols' || n === 'attendance') : (n === 'troops' ? isSuper() : n === 'leaders' ? can('manage_accounts') : n === 'log' ? can('view_log') : true);
+    const canLabels = () => isSuper() || myRole === 'admin'; // roles and tags: not for mods or leaders
+    // troops, accounts and the activity log are for the super admin only; roles & tags also for admins; a mod has just scouts, patrols and attendance
+    const tabAllowed = (n) => isMod() ? (n === 'scouts' || n === 'patrols' || n === 'attendance') : (n === 'troops' || n === 'leaders' || n === 'log' ? isSuper() : n === 'labels' ? canLabels() : true);
 
     const msg = (text, ok) => { $('toast').textContent = text || ''; $('toast').className = 'error' + (ok ? ' ok' : ''); };
     const fail = (e) => { if (e.status === 401 && e.code === 'unauthorized') show(false); msg(errText(e)); };
@@ -225,7 +219,6 @@
     // hide the admin-only and super-admin-only pieces from everyone else
     function applyRole() {
       TABS.forEach((x) => $('btn-' + x).classList.toggle('hidden', !tabAllowed(x)));
-      fillPermChecks();
     }
     function showTab(n) {
       if (!tabAllowed(n)) n = 'scouts';
@@ -240,7 +233,7 @@
       if (n === 'attendance') openAttendance();
       if (n === 'labels') loadLabels();
       if (n === 'troops') loadTroops();
-      if (n === 'leaders' && can('manage_accounts')) loadLeaders();
+      if (n === 'leaders' && isSuper()) loadLeaders();
       if (n === 'log') loadLog();
     }
     TABS.forEach((x) => $('btn-' + x).addEventListener('click', () => showTab(x)));
@@ -248,7 +241,7 @@
     // ---------- scouts ----------
     const labelName = (l) => (state.lang === 'ar' ? l.name_ar : l.name_en);
     const labelById = (id) => labels.find((l) => l.id === id);
-    async function loadScouts() { scouts = await api('/api/leader/scouts'); drawList(); }
+    async function loadScouts() { const at = troopLoad, r = await api('/api/leader/scouts'); if (at !== troopLoad) return; scouts = r; drawList(); } // dropped if the troop was switched meanwhile
 
     // search matches name, full name, phone, and the names of assigned roles/tags (both languages)
     function matches(s, q) {
@@ -270,22 +263,28 @@
       sw.replaceChildren(...troops.map((x) => el('option', { value: String(x.id) }, troopName(x))));
       if (activeTroop() != null) sw.value = String(activeTroop());
       sw.setAttribute('aria-label', t('troop_picker'));
-      $('troopBar').classList.toggle('hidden', !(isSuper() && troops.length > 1));
+      $('troopBar').classList.toggle('hidden', !(roams() && troops.length > 1));
       $('copyFrom').replaceChildren(el('option', { value: '' }, t('copy_none')), ...troops.map((x) => el('option', { value: String(x.id) }, troopName(x))));
     }
-    // pick the troop the super admin works in: the saved one if it still exists, otherwise the first
+    // pick the troop the super admin or a leader works in: the saved one if it still exists, otherwise the first
     function chooseTroop(id) {
       const ok = troops.some((x) => x.id === id);
       state.troop = ok ? id : troops[0]?.id ?? null;
-      if (isSuper()) { try { localStorage.setItem('leaderTroop', String(state.troop)); } catch { /* ignore */ } }
+      if (roams()) { try { localStorage.setItem('leaderTroop', String(state.troop)); } catch { /* ignore */ } }
       const tr = troopById(state.troop);
       setUnitTheme(tr?.theme); paintUnits(); // Rovers call their patrols رهط
       applyTheme(tr?.theme, { en: tr?.brand_en, ar: tr?.brand_ar }, tr && { en: tr.name_en, ar: tr.name_ar }); // the leader area wears the identity (and tab title) of the troop being worked on
     }
     // everything below the switcher belongs to one troop, so switching reloads it all
+    // troopLoad counts troop switches: a reply that arrives after a newer switch belongs to the old troop and is dropped
+    let troopLoad = 0;
     async function loadTroopData() {
+      const mine = ++troopLoad;
       current = null; data = det = null; acts = []; labels = []; patrols = []; scouts = []; meetings = []; meeting = null;
-      [acts, labels, patrols, scouts] = await Promise.all([api('/api/activities'), api('/api/labels'), api('/api/patrols?troop=' + activeTroop()), api('/api/leader/scouts')]);
+      drawList(); drawDetail(); // nothing of the previous troop stays on screen while the new one loads
+      const r = await Promise.all([api('/api/activities'), api('/api/labels'), api('/api/patrols?troop=' + activeTroop()), api('/api/leader/scouts')]);
+      if (mine !== troopLoad) return;
+      [acts, labels, patrols, scouts] = r;
       drawList(); drawDetail(); drawActs(); drawLabels(); drawPatrols();
       if (!$('tab-leaders').classList.contains('hidden')) loadLeaders();
       if (!$('tab-attendance').classList.contains('hidden')) openAttendance();
@@ -313,9 +312,14 @@
 
     async function openScout(id, scrollNext = true) {
       current = id; drawList();
-      try {
-        [data, det] = await Promise.all([api('/api/scouts/' + id), api('/api/leader/scouts/' + id), loadActsQuiet()]);
-      } catch (e) { data = det = null; fail(e); }
+      const troopAtStart = troopLoad;
+      let r = null;
+      try { r = await Promise.all([api('/api/scouts/' + id), api('/api/leader/scouts/' + id), loadActsQuiet()]); }
+      catch (e) { if (current === id) fail(e); }
+      // a slow reply for a scout that is no longer selected (another click, or a troop switch) must not replace what's on screen:
+      // it used to show the wrong scout, and a role picked there could wipe that scout's roles and tags
+      if (current !== id || troopAtStart !== troopLoad) return;
+      [data, det] = r || [null, null];
       drawDetail();
       if (scrollNext && matchMedia('(max-width: 760px)').matches) $('right').scrollIntoView({ block: 'start', behavior: 'smooth' });
     }
@@ -354,7 +358,8 @@
       const box = $('right');
       box.replaceChildren();
       if (!data || !det) return box.append(el('p', { class: 'empty' }, t('select_scout')));
-      const refresh = async () => { await loadScouts(); await openScout(data.id, false); };
+      const id = data.id;
+      const refresh = async () => { await loadScouts(); if (current === id) await openScout(id, false); }; // unless another scout (or troop) was picked meanwhile
 
       // award XP from the activity list
       const sel = el('select', { name: 'activity_id', required: '', 'aria-label': t('activity_select') },
@@ -379,9 +384,8 @@
         try { await api(`/api/scouts/${data.id}/labels`, 'PUT', { label_ids: ids }); msg(''); await refresh(); } catch (e) { fail(e); }
       };
       const labelBlock = (kind, titleKey) => {
-        const locked = (l) => (l.permissions || []).some((p) => !can(p)); // a role with permissions you lack can't be given or taken by you
         const own = labels.filter((l) => l.kind === kind && mine.includes(l.id));
-        const free = labels.filter((l) => l.kind === kind && !mine.includes(l.id) && !locked(l));
+        const free = labels.filter((l) => l.kind === kind && !mine.includes(l.id));
         const pick = el('select', { 'aria-label': t(titleKey) }, el('option', { value: '' }, t('add_to_scout')),
           free.map((l) => el('option', { value: l.id }, labelName(l))));
         pick.addEventListener('change', () => { if (pick.value) saveLabels([...mine, Number(pick.value)]); });
@@ -404,7 +408,7 @@
       });
       const patrolBlock = patrols.length ? el('div', { style: 'margin-bottom:.9rem' }, el('h3', {}, tu('patrol_select')),
         patrolPick, acctScout ? el('small', { class: 'hint' }, tu('patrol_account_note')) : '') : '';
-      const labelsPanel = el('div', { class: 'panel' }, patrolBlock, isMod() ? '' : [labelBlock('role', 'roles'), labelBlock('tag', 'tags')]);
+      const labelsPanel = el('div', { class: 'panel' }, patrolBlock, canLabels() ? [labelBlock('role', 'roles'), labelBlock('tag', 'tags')] : '');
 
       // photo
       const file = el('input', { type: 'file', accept: 'image/*', class: 'hidden' });
@@ -421,7 +425,7 @@
         } }, t('remove_photo')) : '', file);
 
       // details (public name + private fields)
-      const form = el('form', { class: 'panel' },
+      const form = el('form', { class: 'panel', id: 'detailForm' },
         el('h2', {}, t('details')), photoRow,
         field('d_name', 'name', det.name, 'text', { max: 60, required: true }),
         el('p', { class: 'hint' }, t('public_field')),
@@ -458,7 +462,7 @@
       let promotePanel = '';
       if (others.length && !isAcct) {
         const target = el('select', { 'aria-label': t('promote_to') }, others.map((x) => el('option', { value: String(x.id) }, troopName(x))));
-        promotePanel = el('div', { class: 'panel' }, el('h3', {}, t('promote')), el('p', { class: 'hint' }, t('promote_hint')),
+        promotePanel = el('div', { class: 'panel' }, el('h3', {}, t('promote')), el('p', { class: 'hint' }, tu('promote_hint')),
           el('div', { class: 'row' }, target, el('button', { class: 'btn', type: 'button', onclick: async () => {
             const name = troopName(troopById(Number(target.value)));
             if (!(await confirmBox(t('confirm_promote').replace('{name}', data.name).replace('{troop}', name), t('promote')))) return;
@@ -498,7 +502,8 @@
       box.replaceChildren(...patrols.map((p) => {
         const en = el('input', { type: 'text', maxlength: '40', value: p.name_en, 'aria-label': t('name_en') });
         const ar = el('input', { type: 'text', maxlength: '40', value: p.name_ar, dir: 'rtl', 'aria-label': t('name_ar') });
-        const count = scouts.filter((s) => s.patrol_id === p.id).length;
+        // counted like the lists show them: active scouts only, and the leaders' patrol also holds every admin/mod account
+        const count = scouts.filter((s) => s.active !== false && (s.patrol_id === p.id || (p.is_leadership && s.in_council))).length;
         if (p.is_leadership) return el('li', {}, el('div', { class: 'patrol-row grow' }, // pre-made: fixed name, can't be deleted
           el('b', { class: 'grow' }, patrolName(p)), el('small', {}, `${fmt(count)} · ${t('patrol_fixed')}`)));
         return el('li', {}, el('div', { class: 'patrol-row grow' }, en, ar, el('small', {}, fmt(count)),
@@ -538,7 +543,7 @@
 
     // ---------- meetings attendance register (سجل حضور اجتماعات) ----------
     let meetings = [], attSummary = [], meeting = null; // meeting: the sheet being filled in ({ id, meeting_date, title, present_ids }) or null for the list
-    const today = () => new Date().toISOString().slice(0, 10);
+    const today = () => new Date().toLocaleDateString('en-CA'); // the local day (toISOString gave the UTC day: yesterday until 03:00 in Syria)
     const meetingLabel = (m) => fmtDay(m.meeting_date) + (m.title ? ' · ' + m.title : '');
     const countText = (n, of) => t('att_count').replace('{n}', fmt(n)).replace('{m}', fmt(of));
     // the scouts that can be on a sheet: the troop's active scouts, except the super admin who belongs to no troop
@@ -577,20 +582,24 @@
       const refreshCount = () => { counter.textContent = countText(list.filter((s) => present.has(s.id)).length, list.length); };
       const dateIn = el('input', { type: 'date', value: m.meeting_date, required: '', max: today(), 'aria-label': t('att_date') });
       const titleIn = el('input', { type: 'text', maxlength: '80', value: m.title || '', 'aria-label': t('att_title'), placeholder: t('att_title') });
+      // scout id -> checkboxes: an account that also has a regular patrol is listed twice (leaders' patrol + its own), and both copies stay in step
       const checks = new Map();
+      const sync = () => checks.forEach((cs, id) => cs.forEach((c) => { c.checked = present.has(id); }));
       const setAll = async (on) => {
         try { await api(`/api/meetings/${m.id}/attendance`, 'PUT', { present: on }); } catch (e) { return fail(e); }
         present.clear(); if (on) list.forEach((s) => present.add(s.id));
-        m.present_ids = [...present]; checks.forEach((c, id) => { c.checked = present.has(id); }); refreshCount(); msg('');
+        m.present_ids = [...present]; sync(); refreshCount(); msg('');
       };
       const row = (s) => {
-        const c = el('input', { type: 'checkbox', id: 'att' + s.id }); c.checked = present.has(s.id); checks.set(s.id, c);
+        const c = el('input', { type: 'checkbox' }); c.checked = present.has(s.id);
+        checks.set(s.id, [...(checks.get(s.id) || []), c]);
         c.addEventListener('change', async () => {
           const on = c.checked;
           try { await api(`/api/meetings/${m.id}/attendance/${s.id}`, 'PUT', { present: on }); } catch (e) { c.checked = !on; return fail(e); }
-          on ? present.add(s.id) : present.delete(s.id); m.present_ids = [...present]; refreshCount(); msg('');
+          on ? present.add(s.id) : present.delete(s.id); m.present_ids = [...present]; sync(); refreshCount(); msg('');
         });
-        return el('li', {}, el('label', { class: 'grow', for: 'att' + s.id, style: 'display:flex;align-items:center;gap:.6rem;cursor:pointer' }, c, el('span', { dir: 'auto' }, s.name)));
+        // the label wraps its checkbox, so no id/for is needed (a duplicated id made the second name tick the first box)
+        return el('li', {}, el('label', { class: 'grow', style: 'display:flex;align-items:center;gap:.6rem;cursor:pointer' }, c, el('span', { dir: 'auto' }, s.name)));
       };
       // grouped like the scout lists: each patrol under its own heading (the leaders' patrol first), scouts without one last
       const groups = patrols.map((p) => [patrolName(p), list.filter((s) => s.patrol_id === p.id || (p.is_leadership && s.in_council))])
@@ -634,6 +643,8 @@
         case 'activity_delete': return `${verb} ${ar ? m.name_ar : m.name_en}`;
         case 'scout_patrol': return `${verb} ${m.name}${m.patrol ? ` (${m.patrol})` : ''}`;
         case 'scout_promote': return `${verb} ${m.name} ${t('audit_to')} ${m.to}`;
+        case 'depot_reserve': case 'depot_unreserve': return `${verb} ${m.name} × ${fmt(m.quantity)}`; // build 34 entries: one item each
+        case 'depot_book': case 'depot_unbook': return `${verb} ${(m.items || []).map((x) => `${ar ? x.name_ar : x.name_en} × ${fmt(x.quantity)}`).join(ar ? '، ' : ', ')}`;
         case 'login': case 'logout': case 'password_change': return verb;
         default: return `${verb} ${m.name || ''}`;
       }
@@ -658,7 +669,6 @@
             l.color ? el('button', { class: 'btn ghost small', type: 'button', onclick: () => updateLabel(l, { color: '' }) }, t('default_color')) : '',
             kind === 'role' ? el('input', { type: 'number', min: '0', max: '1000', step: '1', value: String(l.priority || 0), class: 'prio', 'aria-label': t('priority'), title: t('priority'),
               onchange: (ev) => updateLabel(l, { priority: ev.target.value }) }) : '',
-            kind === 'role' ? permChecks(l.permissions || [], (next) => updateLabel(l, { permissions: next })) : '',
             el('span', { class: 'grow' }, l.name_en !== l.name_ar ? el('small', { style: 'opacity:.6' }, state.lang === 'ar' ? l.name_en : l.name_ar) : ''),
             el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
               if (!(await confirmBox(t('confirm_delete_label')))) return;
@@ -666,27 +676,13 @@
             } }, t('delete')))) : el('li', { class: 'empty' }, t('no_labels'))));
       }));
     }
-    // a row of permission checkboxes; ones you don't hold yourself are shown but can't be changed (the server refuses it too)
-    function permChecks(current, onChange) {
-      const wrap = el('span', { class: 'perms' });
-      const boxes = PERMS.map((p) => {
-        const box = el('input', { type: 'checkbox', value: p, ...(current.includes(p) ? { checked: '' } : {}), ...(can(p) ? {} : { disabled: '' }) });
-        wrap.append(el('label', { class: 'perm' }, box, ' ', t('perm_' + p)));
-        return box;
-      });
-      if (onChange) boxes.forEach((b) => b.addEventListener('change', () => onChange(boxes.filter((x) => x.checked).map((x) => x.value))));
-      return wrap;
-    }
-    function fillPermChecks() { $('permChecks').replaceChildren(permChecks([])); }
     async function updateLabel(l, patch) {
       try { await api('/api/labels/' + l.id, 'PUT', patch); await loadLabels(); await loadScouts(); msg(t('saved'), true); } catch (e) { fail(e); }
     }
-    $('labelForm').elements.kind.addEventListener('change', (ev) => $('permBox').classList.toggle('hidden', ev.target.value !== 'role'));
     $('labelForm').addEventListener('submit', async (ev) => {
       ev.preventDefault();
       const f = new FormData(ev.target);
-      try { await api('/api/labels', 'POST', { kind: f.get('kind'), name_en: f.get('name_en'), name_ar: f.get('name_ar'), color: f.get('color'), priority: f.get('priority'),
-          permissions: f.get('kind') === 'role' ? [...document.querySelectorAll('#permChecks input:checked')].map((x) => x.value) : [] }); ev.target.reset(); fillPermChecks(); msg(t('saved'), true); await loadLabels(); }
+      try { await api('/api/labels', 'POST', { kind: f.get('kind'), name_en: f.get('name_en'), name_ar: f.get('name_ar'), color: f.get('color'), priority: f.get('priority') }); ev.target.reset(); msg(t('saved'), true); await loadLabels(); }
       catch (e) { fail(e); }
     });
 
@@ -760,14 +756,14 @@
 
     // ---------- login / boot ----------
     async function enter(username, role, troop, look) {
-      me = username; myRole = role || 'admin'; myPerms = look?.perms || []; myTroop = troop ?? null;
+      me = username; myRole = role || 'admin'; myTroop = troop ?? null;
       let saved = null; try { saved = parseInt(localStorage.getItem('leaderTroop'), 10) || null; } catch { /* ignore */ }
-      state.troop = myTroop; // the super admin has none yet: the first request below uses the first troop until one is chosen
+      state.troop = myTroop; // the super admin has none yet (a leader starts in their home troop): the first request below uses the first troop until one is chosen
       if (!isSuper()) applyTheme(look?.theme, { en: look?.brand_en, ar: look?.brand_ar });
       show(true); applyRole(); showTab('scouts'); drawLeaders();
       try {
         troops = await api('/api/troops');
-        chooseTroop(isSuper() ? saved : myTroop); // the super admin starts in the troop they used last; everyone else in their own
+        chooseTroop(roams() ? saved ?? myTroop : myTroop); // the super admin and leaders start in the troop they used last (leaders: else their own); everyone else in their own
         fillTroopSelects();
         [acts, labels, patrols, scouts] = await Promise.all([api('/api/activities'), api('/api/labels'), api('/api/patrols?troop=' + activeTroop()), api('/api/leader/scouts')]);
         drawList(); drawPatrols();
@@ -781,14 +777,23 @@
         const r = await api('/api/login', 'POST', { username: f.get('username'), password: f.get('password') });
         $('loginErr').textContent = ''; ev.target.reset();
         // signing in sends you back to the page you came from (or the dashboard), not into the leader area
-        const back = new URLSearchParams(location.search).get('next');
-        location.replace(back && /^\/(?!\/)/.test(back) && !back.startsWith('/leader.html') ? back : '/');
+        // only a page of this site: the URL parser catches tricks like "/\evil.com" that a plain "starts with /" check lets through
+        let dest = '/';
+        try {
+          const u = new URL(new URLSearchParams(location.search).get('next') || '/', location.origin);
+          if (u.origin === location.origin && u.pathname !== '/leader.html') dest = u.pathname + u.search + u.hash;
+        } catch { /* malformed: go to the dashboard */ }
+        location.replace(dest);
       } catch (e) { $('loginErr').textContent = errText(e); }
     });
 
     document.addEventListener('langchange', () => {
       if ($('app').classList.contains('hidden')) return;
+      // the scout details form is rebuilt in the new language: keep what was typed but not saved yet
+      const form = $('detailForm'), typed = form && Object.fromEntries(new FormData(form));
       paintUnits(); fillTroopSelects(); drawList(); drawDetail(); drawActs(); drawPatrols(); drawLabels(); drawTroops(); drawLeaders(); drawLog(); drawAttendance();
+      const again = $('detailForm');
+      if (typed && again) Object.entries(typed).forEach(([k, v]) => { if (again.elements[k]) again.elements[k].value = v; });
     });
 
     (async () => {
