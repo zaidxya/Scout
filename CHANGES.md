@@ -571,3 +571,8 @@ Files touched: `server.js`, `schema.sql`, `reset-password.js`, `public/common.js
 ## Ticker slower on phones (build 73, "tickerslow")
 - The news ticker's phone speed is lowered from 75 to **60 px per second** (`tickerSpeed()` in `public/index.html`); wider screens are unchanged. To change it again, edit the `60` there.
 - Files touched: `public/index.html`, `README.md`, `CHANGES.md`.
+
+## Bigger slogan that stays on the line, a nicer phone menu (build 74, "menusheet")
+- **Slogan:** a little bigger (1.05rem on wide screens, 0.88rem on phones, was 0.8 / 0.72) and **no width limit** any more (it used to be cut at 12rem / 8.5rem, which pushed longer slogans onto a second line even with room to spare). It now wraps only when the header really has no space left (`.brand-slogan` in `style.css`).
+- **Header menu on phones:** the plain white list is now a **bottom sheet**: it slides up from the bottom over a dimmed page, with a grab bar, rounded corners, big tap rows and a **line icon in a tinted square** in front of every page (home, scouts, reports, leader area, depot, administration, my account, sign in). Tapping the dimmed area, pressing Esc or choosing a page closes it. Wide screens keep the dropdown (now with the small icons too). Icons are fixed SVG drawings in `MENU_ICONS` (`common.js`), added by `menuLink()`; animations are off for people who prefer reduced motion.
+- Files touched: `public/common.js`, `public/style.css`, `README.md`, `CHANGES.md`. Scripts syntax-checked; not run in a browser.

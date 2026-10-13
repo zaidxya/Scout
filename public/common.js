@@ -296,7 +296,7 @@ function confirmBox(message, okLabel) {
 })();
 
 // header dropdown menus close when you click elsewhere or press Esc
-document.addEventListener('click', (e) => document.querySelectorAll('header details.menu[open]').forEach((d) => { if (!d.contains(e.target)) d.removeAttribute('open'); }));
+document.addEventListener('click', (e) => document.querySelectorAll('header details.menu[open]').forEach((d) => { if (!d.contains(e.target) || e.target === d) d.removeAttribute('open'); })); // (e.target === d: the dimmed page behind the phone menu)
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') document.querySelectorAll('header details.menu[open]').forEach((d) => d.removeAttribute('open')); });
 
 // the header menu (same on every page): the button names the page you are on, the list holds the other pages
@@ -330,6 +330,23 @@ function paintWelcome() {
   document.querySelectorAll('header p[data-i18n="subtitle"]').forEach((p) => { p.textContent = t('subtitle_named').replace('{name}', meDisplay.trim().split(/\s+/)[0]); });
 }
 document.addEventListener('langchange', paintWelcome);
+// a small line icon in front of each page in the menu (fixed drawings, never built from data)
+const MENU_ICONS = {
+  home: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h5v-6h4v6h5V10"/>',
+  scouts: '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M16 5a3.2 3.2 0 0 1 0 6"/><path d="M18 14.3c1.8.7 3 2.4 3 4.7"/>',
+  reports: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1"/><path d="M8.5 10h7M8.5 14h7M8.5 18h4"/>',
+  leader: '<path d="M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
+  depot: '<path d="M3 8l9-5 9 5v9l-9 5-9-5z"/><path d="M3 8l9 5 9-5M12 13v9"/>',
+  admin: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
+  account: '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/>',
+  signin: '<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 17l-5-5 5-5M5 12h11"/>',
+};
+function menuLink(href, textKey, icon, cls) {
+  const a = document.createElement('a'); a.href = href; if (cls) a.className = cls;
+  const i = document.createElement('span'); i.className = 'mi'; i.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true">' + (MENU_ICONS[icon] || '') + '</svg>';
+  a.append(i, document.createTextNode(t(textKey)));
+  return a;
+}
 function paintMenu() {
   document.querySelectorAll('header details.menu[data-page]').forEach((d) => {
     if (!state.dict.home) return; // language file not loaded yet
@@ -337,16 +354,14 @@ function paintMenu() {
     let sum = d.querySelector('summary'), list = d.querySelector('.menu-list');
     if (!sum) { sum = document.createElement('summary'); list = document.createElement('div'); list.className = 'menu-list'; d.append(sum, list); }
     sum.textContent = t(SITE_PAGES[here][1]);
-    const links = Object.entries(SITE_PAGES).filter(([k]) => k !== here && k !== 'account' && (k !== 'reports' || signedIn === true) && (k !== 'admin' || (signedIn === true && meRole === 'super_admin'))).map(([, [href, key]]) => { // (My account is not a regular entry: it takes the place of Sign in once signed in)
-      const a = document.createElement('a'); a.href = href; a.textContent = t(key); return a;
-    });
+    const links = Object.entries(SITE_PAGES).filter(([k]) => k !== here && k !== 'account' && (k !== 'reports' || signedIn === true) && (k !== 'admin' || (signedIn === true && meRole === 'super_admin'))).map(([k, [href, key]]) => menuLink(href, key, k)); // (My account is not a regular entry: it takes the place of Sign in once signed in)
     // visitors who aren't signed in get a Sign in option (the sign-in form lives on the leader page, so not shown there)
     if (signedIn === false && here !== 'leader') {
-      const a = document.createElement('a'); a.href = '/leader.html?next=' + encodeURIComponent(location.pathname + location.search); a.className = 'signin'; a.textContent = t('sign_in'); links.push(a);
+      links.push(menuLink('/leader.html?next=' + encodeURIComponent(location.pathname + location.search), 'sign_in', 'signin', 'signin'));
     }
     // signed in: My account takes the place of Sign in (the last row, set apart by a line)
     if (signedIn === true && here !== 'account') {
-      const a = document.createElement('a'); a.href = SITE_PAGES.account[0]; a.className = 'signin'; a.textContent = t('my_account'); links.push(a);
+      links.push(menuLink(SITE_PAGES.account[0], 'my_account', 'account', 'signin'));
     }
     list.replaceChildren(...links);
   });

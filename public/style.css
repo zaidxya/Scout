@@ -641,5 +641,23 @@ header .menu-list .menu-head { margin-top: .25rem; padding: .5rem 1rem .2rem; bo
 .log-row .chip { flex: none; }
 
 /* the troop's slogan, in the header right beside the troop's name (leader area) */
-header .brand .brand-slogan { align-self: center; padding-inline-start: .7rem; border-inline-start: 1px solid rgba(var(--on-primary-rgb), .45); font-size: .8rem; font-weight: 600; font-style: italic; line-height: 1.25; opacity: .9; white-space: normal; max-width: 12rem; }
-@media (max-width: 760px) { header .brand .brand-slogan { font-size: .72rem; max-width: 8.5rem; padding-inline-start: .5rem; } }
+header .brand .brand-slogan { align-self: center; flex: 0 1 auto; min-width: 0; padding-inline-start: .75rem; border-inline-start: 1px solid rgba(var(--on-primary-rgb), .45); font-size: 1.05rem; font-weight: 600; font-style: italic; line-height: 1.25; opacity: .92; white-space: normal; }
+@media (max-width: 760px) { header .brand .brand-slogan { font-size: .88rem; padding-inline-start: .55rem; } }
+
+/* header menu: a small icon in front of every page; on phones it opens as a bottom sheet over the dimmed page, with big tap rows */
+header .menu-list a { display: flex; align-items: center; gap: .75rem; }
+header .menu-list .mi { flex: none; display: grid; place-items: center; width: 1.9rem; height: 1.9rem; border-radius: 8px; background: var(--accent-soft); color: var(--primary); }
+header .menu-list .mi svg { width: 1.15rem; height: 1.15rem; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+@keyframes sheet-up { from { transform: translateY(24px); opacity: 0; } }
+@keyframes sheet-fade { from { opacity: 0; } }
+@media (max-width: 760px) {
+  header details.menu[open]::before { content: ''; position: fixed; inset: 0; z-index: 40; background: rgba(var(--ink-rgb), .5); animation: sheet-fade .2s ease; }
+  header details.menu[open] > .menu-list { position: fixed; z-index: 41; inset-inline: .6rem; top: auto; bottom: max(.6rem, env(safe-area-inset-bottom)); min-width: 0; max-height: calc(100vh - 2rem); overflow-y: auto; padding: .4rem .5rem .6rem; gap: .15rem; border: 0; border-radius: 20px; box-shadow: 0 -6px 30px rgba(var(--ink-rgb), .3); animation: sheet-up .22s ease; }
+  header .menu-list::before { content: ''; align-self: center; width: 2.6rem; height: .3rem; margin: .15rem 0 .45rem; border-radius: 99px; background: var(--line); }
+  header .menu-list a { padding: .8rem .9rem; border-radius: 14px; font-size: 1.05rem; font-weight: 600; }
+  header .menu-list a:active { background: var(--accent-soft); }
+  header .menu-list .mi { width: 2.4rem; height: 2.4rem; border-radius: 12px; }
+  header .menu-list .mi svg { width: 1.3rem; height: 1.3rem; }
+  header .menu-list a.signin { margin-top: .4rem; border-top: 1px solid var(--line); border-radius: 14px; }
+}
+@media (prefers-reduced-motion: reduce) { header details.menu[open]::before, header details.menu[open] > .menu-list { animation: none; } }
