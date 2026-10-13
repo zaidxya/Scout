@@ -661,3 +661,28 @@ header .menu-list .mi svg { width: 1.15rem; height: 1.15rem; fill: none; stroke:
   header .menu-list a.signin { margin-top: .4rem; border-top: 1px solid var(--line); border-radius: 14px; }
 }
 @media (prefers-reduced-motion: reduce) { header details.menu[open]::before, header details.menu[open] > .menu-list { animation: none; } }
+
+/* dropdowns: the select shows a small arrow of its own; its list is the styled one from common.js (a popover, or a bottom sheet on phones) */
+select:not([multiple]):not([size]) { -webkit-appearance: none; appearance: none; cursor: pointer; padding-inline-end: 2.4rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%237a6b86' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: left .75rem center; background-size: 1.05rem; }
+html[dir=ltr] select:not([multiple]):not([size]) { background-position: right .75rem center; }
+.cs-dim { position: fixed; inset: 0; z-index: 60; background: transparent; }
+.cs-pop { position: fixed; z-index: 61; display: flex; flex-direction: column; max-height: 18rem; overflow: hidden; background: var(--paper); color: var(--ink); border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 10px 30px rgba(var(--ink-rgb), .22); animation: cs-in .12s ease; }
+.cs-list { overflow-y: auto; padding: .3rem; overscroll-behavior: contain; }
+.cs-opt { display: flex; align-items: center; justify-content: space-between; gap: .6rem; padding: .55rem .8rem; border-radius: 8px; line-height: 1.35; cursor: pointer; overflow-wrap: anywhere; }
+.cs-opt.active { background: var(--accent-soft); }
+.cs-opt[aria-selected=true] { color: var(--primary); font-weight: 700; }
+.cs-opt[aria-selected=true]::after { content: ''; flex: none; width: .85rem; height: .45rem; border-left: 2.5px solid currentColor; border-bottom: 2.5px solid currentColor; transform: rotate(-45deg) translateY(-.12rem); }
+.cs-opt[aria-disabled=true] { opacity: .45; cursor: default; }
+.cs-title { display: none; }
+@keyframes cs-in { from { opacity: 0; transform: translateY(-4px); } }
+@media (max-width: 760px) {
+  .cs-dim { background: rgba(var(--ink-rgb), .5); animation: sheet-fade .2s ease; }
+  .cs-pop { inset-inline: .6rem; top: auto; bottom: max(.6rem, env(safe-area-inset-bottom)); max-height: 70vh; border: 0; border-radius: 20px; box-shadow: 0 -6px 30px rgba(var(--ink-rgb), .3); animation: sheet-up .22s ease; }
+  .cs-pop::before { content: ''; flex: none; align-self: center; width: 2.6rem; height: .3rem; margin: .5rem 0 .2rem; border-radius: 99px; background: var(--line); }
+  .cs-title { display: block; padding: .3rem 1.1rem .4rem; font-size: .9rem; font-weight: 700; color: var(--muted); }
+  .cs-list { padding: .2rem .5rem .6rem; }
+  .cs-opt { padding: .85rem .9rem; border-radius: 14px; font-size: 1.05rem; }
+}
+@media (prefers-reduced-motion: reduce) { .cs-pop, .cs-dim { animation: none; } }

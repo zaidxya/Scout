@@ -368,3 +368,90 @@ function paintMenu() {
 }
 document.addEventListener('langchange', paintMenu);
 document.addEventListener('DOMContentLoaded', paintMenu);
+
+// ---- dropdowns: every <select> opens a styled list (a bottom sheet on phones, a small popover on wide screens) instead of the browser's own one.
+// The <select> itself stays in the page (it shows the choice, takes focus, is validated and submitted as always); only its list is replaced:
+// choosing sets its value and fires input and change on it, so the code listening to it needs nothing new. Add data-native to a select to keep the browser's own list.
+(function () {
+  const phone = () => matchMedia('(max-width: 760px)').matches;
+  let cur = null; // the open list: { sel, dim, pop, items, active, ... }
+  function close(refocus) {
+    if (!cur) return;
+    const c = cur; cur = null;
+    c.pop.remove(); c.dim.remove();
+    document.removeEventListener('keydown', c.onKey, true); removeEventListener('resize', c.onAway); removeEventListener('scroll', c.onScroll, true);
+    if (refocus) c.sel.focus({ preventScroll: true });
+  }
+  function choose(sel, i) {
+    const o = sel.options[i];
+    if (!o || o.disabled) return false;
+    const changed = sel.selectedIndex !== i;
+    sel.selectedIndex = i;
+    if (changed) { sel.dispatchEvent(new Event('input', { bubbles: true })); sel.dispatchEvent(new Event('change', { bubbles: true })); }
+    return true;
+  }
+  function show(sel) {
+    if (cur) { const same = cur.sel === sel; close(); if (same) return; }
+    if (sel.disabled || !sel.options.length) return;
+    const dim = document.createElement('div'); dim.className = 'cs-dim';
+    const pop = document.createElement('div'); pop.className = 'cs-pop'; pop.setAttribute('role', 'listbox');
+    const title = (sel.closest('label')?.querySelector('span')?.textContent || sel.getAttribute('aria-label') || '').trim(); // shown on top of the phone sheet
+    if (title) { const h = document.createElement('div'); h.className = 'cs-title'; h.textContent = title; pop.append(h); }
+    const list = document.createElement('div'); list.className = 'cs-list'; pop.append(list);
+    const items = [...sel.options].map((o, i) => {
+      const d = document.createElement('div'); d.className = 'cs-opt'; d.setAttribute('role', 'option'); d.dataset.i = String(i); d.textContent = o.text;
+      if (o.disabled) d.setAttribute('aria-disabled', 'true');
+      if (i === sel.selectedIndex) d.setAttribute('aria-selected', 'true');
+      list.append(d); return d;
+    });
+    document.body.append(dim, pop);
+    let active = sel.selectedIndex >= 0 && !sel.options[sel.selectedIndex].disabled ? sel.selectedIndex : items.findIndex((d) => !d.hasAttribute('aria-disabled'));
+    const setActive = (i) => { if (i < 0 || i >= items.length) return; items[active]?.classList.remove('active'); active = i; items[i].classList.add('active'); items[i].scrollIntoView({ block: 'nearest' }); };
+    setActive(active);
+    if (!phone()) { // a popover under the select (above it when there is no room below), kept inside the window
+      const r = sel.getBoundingClientRect();
+      pop.style.minWidth = Math.max(r.width, 160) + 'px';
+      const w = pop.offsetWidth, h = pop.offsetHeight;
+      pop.style.left = Math.min(Math.max(8, r.left), Math.max(8, innerWidth - w - 8)) + 'px';
+      pop.style.top = (r.bottom + 4 + h > innerHeight - 8 && r.top - 4 - h > 8 ? r.top - 4 - h : r.bottom + 4) + 'px';
+    }
+    pop.addEventListener('click', (e) => { const d = e.target.closest('.cs-opt'); if (d && choose(sel, Number(d.dataset.i))) close(true); });
+    pop.addEventListener('mousemove', (e) => { const d = e.target.closest('.cs-opt'); if (d && !d.hasAttribute('aria-disabled')) setActive(Number(d.dataset.i)); });
+    dim.addEventListener('click', () => close(true));
+    let typed = '', typedAt = 0;
+    const onKey = (e) => {
+      const k = e.key;
+      if (k === 'Escape') { e.preventDefault(); e.stopPropagation(); close(true); return; }
+      if (k === 'Tab') { close(); return; }
+      const move = (step, from) => { let i = from; do { i += step; } while (i >= 0 && i < items.length && items[i].hasAttribute('aria-disabled')); if (i >= 0 && i < items.length) setActive(i); };
+      if (k === 'ArrowDown') move(1, active); else if (k === 'ArrowUp') move(-1, active);
+      else if (k === 'Home') move(1, -1); else if (k === 'End') move(-1, items.length);
+      else if (k === 'Enter' || k === ' ') { if (choose(sel, active)) close(true); }
+      else if (k.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) { // type the first letters of an option to jump to it
+        typed = (Date.now() - typedAt > 800 ? '' : typed) + k.toLowerCase(); typedAt = Date.now();
+        const hit = items.findIndex((d, i) => !d.hasAttribute('aria-disabled') && sel.options[i].text.trim().toLowerCase().startsWith(typed));
+        if (hit >= 0) setActive(hit);
+      } else return;
+      e.preventDefault(); e.stopPropagation();
+    };
+    const onAway = () => close();
+    const onScroll = (e) => { if (!pop.contains(e.target)) close(); };
+    document.addEventListener('keydown', onKey, true);
+    if (!phone()) { addEventListener('resize', onAway); addEventListener('scroll', onScroll, true); }
+    cur = { sel, dim, pop, onKey, onAway, onScroll };
+  }
+  function enhance(sel) {
+    if (sel.dataset.cs || sel.multiple || sel.size > 1 || sel.hasAttribute('data-native')) return;
+    sel.dataset.cs = '1';
+    sel.addEventListener('mousedown', (e) => { if (e.button !== 0) return; e.preventDefault(); sel.focus({ preventScroll: true }); show(sel); }); // (nothing opens the browser's own list)
+    let sx = 0, sy = 0, moved = false;
+    sel.addEventListener('touchstart', (e) => { const p = e.touches[0]; sx = p.clientX; sy = p.clientY; moved = false; }, { passive: true });
+    sel.addEventListener('touchmove', (e) => { const p = e.touches[0]; if (Math.abs(p.clientX - sx) > 10 || Math.abs(p.clientY - sy) > 10) moved = true; }, { passive: true });
+    sel.addEventListener('touchend', (e) => { if (moved || e.touches.length) return; e.preventDefault(); show(sel); }, { passive: false }); // a tap, not a scroll
+    sel.addEventListener('click', (e) => e.preventDefault());
+    sel.addEventListener('keydown', (e) => { if (e.key === ' ' || e.key === 'Enter' || e.key === 'F4' || (e.altKey && (e.key === 'ArrowDown' || e.key === 'ArrowUp'))) { e.preventDefault(); show(sel); } });
+  }
+  const scan = (root) => { if (root.matches?.('select')) enhance(root); root.querySelectorAll?.('select').forEach(enhance); };
+  new MutationObserver((ms) => ms.forEach((m) => m.addedNodes.forEach((n) => { if (n.nodeType === 1) scan(n); }))).observe(document.documentElement, { childList: true, subtree: true });
+  document.addEventListener('DOMContentLoaded', () => scan(document));
+})();

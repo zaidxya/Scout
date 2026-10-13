@@ -109,6 +109,10 @@ Existing databases are upgraded automatically on startup: the `LEADER_USERNAME` 
   1. On your computer, in the project folder with `.env` filled in (same `DATABASE_URL` as the live site), run `node reset-password.js <username> <new-password>` (8+ characters). It also works in Render's **Shell** tab, where `DATABASE_URL` is already set.
   2. No local setup? Run `node -e "console.log(require('bcryptjs').hashSync('NEW_PASSWORD', 12))"` and in Neon's SQL Editor run `UPDATE leaders SET password_hash = '<that hash>', session_v = session_v + 1 WHERE username = 'boss';`.
 
+## Dropdowns
+
+Every `<select>` in the site (the troop switcher, "View as", activity and patrol pickers, filters, account types, themes...) opens a **styled list** instead of the browser's own: a small popover on wide screens and a **bottom sheet** (dimmed page, grab bar, the field's name as a title, big rows, a tick on the current choice) on phones. It is done once for all of them in `common.js` (the block "dropdowns"), so new selects get it automatically, including ones the pages create later. The `<select>` stays in the page (it shows the choice, is validated and submitted as before); choosing sets its value and fires `input` and `change`, so existing code needs nothing. Keyboard: Space, Enter or Alt+Down open it, arrows move, Enter chooses, Esc closes, typing jumps to an option. Add `data-native` to a select to keep the browser's own list. Styles: end of `style.css` (`.cs-*`).
+
 ## Tech
 
 Node.js 18+, Express, PostgreSQL on Neon (`pg`), `morgan` for request logging, `compression` for gzip, plain HTML/CSS/JavaScript on the front end (no build step).
