@@ -122,6 +122,10 @@ document.addEventListener('submit', (e) => {
   releaseForms(); // a handler that sends nothing is released straight away
 }, true);
 
+// the super admin can view the site as another account (kept per browser tab): every request then carries that account's id and the server answers as it, read-only
+const viewAsId = () => { try { return sessionStorage.getItem('viewAs') || ''; } catch { return ''; } };
+const setViewAs = (id) => { try { if (id) sessionStorage.setItem('viewAs', String(id)); else sessionStorage.removeItem('viewAs'); } catch { /* ignore */ } };
+const viewAsHeader = () => (viewAsId() ? { 'X-View-As': viewAsId() } : {});
 async function api(url, method = 'GET', body) {
   pending++;
   try {
@@ -129,7 +133,7 @@ async function api(url, method = 'GET', body) {
       method,
       credentials: 'same-origin',
       // state.troop is set in the leader area only: it tells the server which troop the super admin is working in
-      headers: { 'Content-Type': 'application/json', ...(state.troop ? { 'X-Troop': String(state.troop) } : {}) },
+      headers: { 'Content-Type': 'application/json', ...(state.troop ? { 'X-Troop': String(state.troop) } : {}), ...viewAsHeader() },
       body: body ? JSON.stringify(body) : undefined,
     });
     const data = await r.json().catch(() => ({}));
@@ -296,13 +300,30 @@ document.addEventListener('click', (e) => document.querySelectorAll('header deta
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') document.querySelectorAll('header details.menu[open]').forEach((d) => d.removeAttribute('open')); });
 
 // the header menu (same on every page): the button names the page you are on, the list holds the other pages
-const SITE_PAGES = { home: ['/', 'home'], leader: ['/leader.html', 'leader_area'], depot: ['/depot.html', 'depot'], account: ['/account.html', 'my_account'] };
+const SITE_PAGES = { home: ['/', 'home'], scouts: ['/scouts.html', 'scout_list'], reports: ['/reports.html', 'reports_page'], leader: ['/leader.html', 'leader_area'], depot: ['/depot.html', 'depot'], admin: ['/admin.html', 'tab_admin'], account: ['/account.html', 'my_account'] };
 let signedIn = null; // null = not known yet
 let meDisplay = null;
 // the session check runs once per page load and is shared: pages call getMe() instead of asking the server again (null = not signed in)
 let mePromise = null;
-const getMe = () => (mePromise ||= fetch('/api/me', { credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : null)).catch(() => null));
-getMe().then((me) => { signedIn = !!me; meDisplay = me?.display_name || me?.username || null; paintMenu(); paintWelcome(); });
+const getMe = () => (mePromise ||= fetch('/api/me', { credentials: 'same-origin', headers: viewAsHeader() }).then((r) => (r.ok ? r.json() : null)).catch(() => null));
+let meRole = null, meViewing = null; // the role being shown (the viewed account's while the super admin is viewing as it) and that account
+getMe().then((me) => {
+  signedIn = !!me; meDisplay = me?.display_name || me?.username || null; meRole = me?.role || null; meViewing = me?.viewing || null;
+  if (!meViewing && viewAsId()) setViewAs(null); // a stale choice (the account is gone, or this is not the super admin)
+  paintMenu(); paintWelcome(); paintViewBanner();
+});
+// the strip across the top while the super admin is viewing as another account: who, that it is read-only, and the way out
+function paintViewBanner() {
+  document.querySelector('.view-banner')?.remove();
+  if (!meViewing || !state.dict.view_banner || !document.body) return;
+  const b = document.createElement('div'); b.className = 'view-banner'; b.setAttribute('role', 'status');
+  const txt = document.createElement('span');
+  txt.textContent = t('view_banner').replace('{name}', meViewing.display_name || meViewing.username).replace('{level}', t('acct_' + meViewing.role));
+  const x = document.createElement('button'); x.type = 'button'; x.textContent = t('view_exit');
+  x.addEventListener('click', () => { setViewAs(null); location.reload(); });
+  b.append(txt, x); document.body.prepend(b);
+}
+document.addEventListener('langchange', paintViewBanner);
 // signed in: the welcome caption on the dashboard greets the account by the first word of its display name (the first name)
 function paintWelcome() {
   if (!meDisplay || !state.dict.subtitle_named) return;
@@ -316,7 +337,7 @@ function paintMenu() {
     let sum = d.querySelector('summary'), list = d.querySelector('.menu-list');
     if (!sum) { sum = document.createElement('summary'); list = document.createElement('div'); list.className = 'menu-list'; d.append(sum, list); }
     sum.textContent = t(SITE_PAGES[here][1]);
-    const links = Object.entries(SITE_PAGES).filter(([k]) => k !== here && k !== 'account').map(([, [href, key]]) => { // (My account is not a regular entry: it takes the place of Sign in once signed in)
+    const links = Object.entries(SITE_PAGES).filter(([k]) => k !== here && k !== 'account' && (k !== 'reports' || signedIn === true) && (k !== 'admin' || (signedIn === true && meRole === 'super_admin'))).map(([, [href, key]]) => { // (My account is not a regular entry: it takes the place of Sign in once signed in)
       const a = document.createElement('a'); a.href = href; a.textContent = t(key); return a;
     });
     // visitors who aren't signed in get a Sign in option (the sign-in form lives on the leader page, so not shown there)

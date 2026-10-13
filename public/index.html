@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="ar" dir="rtl" data-title="title_dashboard">
+<html lang="ar" dir="rtl" data-title="title">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -21,138 +21,182 @@
       <button id="langBtn" type="button" class="lang" data-i18n="lang_toggle">العربية</button>
     </nav>
   </header>
-  <main class="cols">
-    <button id="backList" class="btn ghost small back-list" type="button" data-i18n="back_to_list"></button>
-    <section>
-      <select id="troopPick" class="hidden"></select>
-      <input id="search" type="search" data-i18n-ph="search" aria-label="Search">
-      <ul id="list" class="scout-list"></ul>
-    </section>
-    <section id="detail" class="detail"></section>
+  <!-- the news ticker: the posts marked "show in the ticker", scrolling across the top (paused on hover) -->
+  <div id="ticker" class="ticker hidden" role="region">
+    <span class="ticker-label" data-i18n="home_ticker_label"></span>
+    <div class="ticker-view"><div id="tickerTrack" class="ticker-track"></div></div>
+  </div>
+  <main class="home">
+    <p id="toast" class="error" role="status"></p>
+    <nav class="quick">
+      <a class="quick-card" href="/scouts.html"><b data-i18n="scout_list"></b><small data-i18n="home_scouts_hint"></small></a>
+      <a class="quick-card" href="/depot.html"><b data-i18n="depot"></b><small data-i18n="home_depot_hint"></small></a>
+      <a id="quickReports" class="quick-card hidden" href="/reports.html"><b data-i18n="reports_page"></b><small data-i18n="home_reports_hint"></small></a>
+    </nav>
+    <!-- writing posts (admins, leaders and the super admin): the button opens the form -->
+    <div id="postTools" class="home-bar hidden">
+      <button id="addPostBtn" class="btn small" type="button" aria-expanded="false" aria-controls="postForm">+ <span data-i18n="home_add_post"></span></button>
+    </div>
+    <form id="postForm" class="panel hidden">
+      <h2 id="postFormTitle" data-i18n="post_new"></h2>
+      <p class="hint" data-i18n="news_hint"></p>
+      <div class="grid2">
+        <label><span data-i18n="post_kind"></span><select name="kind"><option value="news" data-i18n="post_kind_news"></option><option value="activity" data-i18n="post_kind_activity"></option><option value="event" data-i18n="post_kind_event"></option></select></label>
+        <label><span data-i18n="post_date"></span><input name="event_date" type="date"></label>
+      </div>
+      <label><span data-i18n="post_title"></span><input name="title" type="text" maxlength="120" required></label>
+      <label><span data-i18n="post_body"></span><textarea name="body" maxlength="2000"></textarea></label>
+      <fieldset id="postTroopLabel" class="troop-pick hidden"><legend data-i18n="post_audience"></legend><p class="hint" data-i18n="post_troops_hint"></p><div id="postTroops" class="troop-checks"></div></fieldset>
+      <label class="inline-check"><input name="ticker" type="checkbox"> <span data-i18n="post_ticker"></span></label>
+      <label class="inline-check"><input name="pinned" type="checkbox"> <span data-i18n="post_pin"></span></label>
+      <div class="row"><button class="btn" type="submit" data-i18n="save"></button><button id="postCancel" class="btn quiet" type="button" data-i18n="cancel"></button></div>
+    </form>
+    <div class="home-cols">
+      <section class="panel">
+        <h2 data-i18n="home_upcoming"></h2>
+        <ul id="upcoming" class="posts"></ul>
+      </section>
+      <section class="panel">
+        <h2 data-i18n="home_news"></h2>
+        <ul id="news" class="posts"></ul>
+        <button id="moreNews" class="btn ghost small hidden" type="button" data-i18n="home_more"></button>
+      </section>
+    </div>
   </main>
   <script src="/common.js"></script>
   <script>
-    const listEl = document.getElementById('list'), detailEl = document.getElementById('detail'), search = document.getElementById('search');
-    let scouts = [], patrols = [], troops = [], troop = null, current = null, data = null;
-    let staff = false, me = null, priv = null; // staff: a signed-in account sees the scout's private details (read-only); editing stays in the leader area
-    const privCache = {};
-    const picker = document.getElementById('troopPick');
-    const detailCache = {}; // last seen detail per scout, shown instantly while the fresh copy loads
-
-    function drawList() {
-      const q = norm(search.value.trim());
-      const hit = (s) => { const p = patrols.find((x) => x.id === s.patrol_id); return [s.name, p?.name_en, p?.name_ar, ...(s.roles || []).flatMap((r) => [r.name_en, r.name_ar])].some((v) => norm(v).includes(q)); };
-      renderScoutList(listEl, scouts.filter(hit), current, openScout, (s) => el('span', { class: 'sub' }, roleChips(s.roles)), scouts.length ? 'no_results' : 'no_scouts', patrols); // split under a heading per patrol when the troop has any
-    }
-    let loading = false;
-    function drawDetail() {
-      detailEl.replaceChildren();
-      if (loading) return detailEl.append(el('p', { class: 'empty' }, t('loading')));
-      if (!data) return detailEl.append(el('p', { class: 'empty' }, t('select_scout')));
-      detailEl.append(renderDetailHead(data), ...(priv && priv.id === data.id ? [privateCard(priv)] : []), renderLog(data));
-    }
-    // the private details as plain text: signed-in accounts only, and only for scouts the account may open (its own troop; all troops for the super admin and leaders)
-    const PRIV = [['d_full_name', 'full_name'], ['d_phone', 'phone', 'tel'], ['d_join_date', 'join_date', 'day'], ['d_birth_date', 'birth_date', 'day'],
-      ['d_guardian_name', 'guardian_name'], ['d_guardian_phone', 'guardian_phone', 'tel'], ['d_address', 'address'], ['d_medical', 'medical_notes'], ['d_notes', 'notes']];
-    function privateCard(p) {
-      const rows = PRIV.filter(([, k]) => p[k]).flatMap(([label, k, kind]) => [
-        el('dt', {}, t(label)),
-        el('dd', {}, el('bdi', {}, kind === 'tel' ? el('a', { href: 'tel:' + p[k], dir: 'ltr' }, p[k]) : kind === 'day' ? fmtDay(p[k]) : p[k]))]); // dd keeps the page direction (so every value starts beside its label); bdi gives each value its own text direction
-      return el('div', { class: 'panel priv' },
-        el('h3', {}, t('private_info')),
-        el('p', { class: 'hint' }, t('private_view_hint')),
-        rows.length ? el('dl', { class: 'priv-dl' }, rows) : el('p', { class: 'empty' }, t('private_none')),
-        p.tags && p.tags.length ? el('div', {}, el('h4', {}, t('tags')), roleChips(p.tags)) : '',
-        !(me && (me.role === 'super_admin' || me.role === 'leader' || me.troop_id === p.troop_id)) ? '' : // editing is only offered where the account may edit
-        el('a', { class: 'btn ghost small', href: '/leader.html', onclick: () => { try { localStorage.setItem('leaderTroop', String(p.troop_id)); } catch { /* ignore */ } } }, t('private_edit')));
-    }
-    async function openScout(id) {
-      current = id;
-      history.replaceState(null, '', '#' + id);
-      drawList();
-      openDetailView(document.querySelector('main.cols')); // phones: the page replaces the list (no scrolling down)
-      data = detailCache[id] || null; priv = staff ? privCache[id] || null : null; loading = !data; drawDetail(); // cached copy (or a loading note) right away
-      const privReq = staff ? api('/api/leader/scouts/' + id).catch(() => null) : null; // null: another troop's scout for an admin or mod
-      try {
-        const fresh = await api('/api/scouts/' + id);
-        if (current !== id) return; // the visitor already picked someone else
-        const freshPriv = privReq ? await privReq : null;
-        if (current !== id) return;
-        const changed = JSON.stringify(fresh) !== JSON.stringify(data) || JSON.stringify(freshPriv) !== JSON.stringify(priv);
-        detailCache[id] = data = fresh; privCache[id] = priv = freshPriv; loading = false;
-        if (fresh.troop_id && fresh.troop_id !== troop && troops.some((x) => x.id === fresh.troop_id)) await switchTroop(fresh.troop_id, true); // link to a scout of another troop
-        if (changed) drawDetail();
-      } catch { if (current !== id) return; if (!data) { loading = false; drawDetail(); } }
-      loading = false;
-    }
-    document.getElementById('backList').addEventListener('click', closeDetailView);
-    search.addEventListener('input', frame(drawList));
-
-    // ---- troops: one list per troop, picker only shown when there is more than one ----
+    const $ = (id) => document.getElementById(id);
+    let troops = [], posts = [], me = null, loaded = false, shown = 12, editing = null; // shown: how many of the news list are on screen; editing: the post in the form (null = a new one)
+    const today = () => new Date().toLocaleDateString('en-CA'); // the local day
+    const KIND = { news: 'post_kind_news', activity: 'post_kind_activity', event: 'post_kind_event' };
+    const isUpcoming = (p) => p.kind !== 'news' && p.event_date && p.event_date >= today(); // activities and events from today on
     const troopLabel = (x) => (state.lang === 'ar' ? x.name_ar : x.name_en);
-    function drawPicker() {
-      picker.replaceChildren(...troops.map((x) => el('option', { value: String(x.id) }, troopLabel(x))));
-      picker.value = String(troop);
-      picker.setAttribute('aria-label', t('troop_picker'));
-      picker.classList.toggle('hidden', troops.length < 2);
+    // who writes: admins, leaders and the super admin. The super admin and leaders pick any troops (or all); an admin's posts always include its own troop
+    const isPoster = () => !!me && ['super_admin', 'admin', 'leader'].includes(me.role);
+    const roams = () => !!me && (me.role === 'super_admin' || me.role === 'leader');
+    const canEdit = (p) => isPoster() && (roams() || p.troop_ids.includes(me.troop_id)); // an admin: the posts its own troop is part of
+    const msg = (text, ok) => { $('toast').textContent = text || ''; $('toast').className = 'error' + (ok ? ' ok' : ''); };
+
+    function postCard(p) {
+      const involved = p.troop_ids.map((id) => troops.find((x) => x.id === id)).filter(Boolean); // the troops it is about (none listed = all troops)
+      return el('li', { class: 'post' + (p.pinned ? ' pinned' : ''), id: 'p' + p.id },
+        el('div', { class: 'post-meta' },
+          el('span', { class: 'chip' }, t(KIND[p.kind] || KIND.news)),
+          p.pinned ? el('span', { class: 'chip leader' }, t('post_pinned')) : '',
+          ...involved.map((tr) => el('span', { class: 'chip tag' }, troopLabel(tr))), // a post says which troops it is about
+          el('small', {}, fmtDay(p.event_date || p.created_at))),
+        el('h3', { dir: 'auto' }, p.title),
+        p.body ? el('p', { class: 'post-body', dir: 'auto' }, p.body) : '', // plain text: line breaks kept, nothing is read as HTML
+        canEdit(p) ? el('div', { class: 'row post-actions' },
+          el('button', { class: 'btn ghost small', type: 'button', onclick: () => openForm(p) }, t('edit')),
+          el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
+            if (!(await confirmBox(t('confirm_delete_post')))) return;
+            try { await api('/api/posts/' + p.id, 'DELETE'); if (editing === p.id) closeForm(); msg(''); await loadPosts(); } catch (e) { msg(errText(e)); }
+          } }, t('delete'))) : '');
     }
-    const listCache = (id) => { try { return JSON.parse(localStorage.getItem('scouts_cache_' + id)) || []; } catch { return []; } };
-    async function loadList(id) {
-      const l = await api('/api/scouts?troop=' + id);
-      try { localStorage.setItem('scouts_cache_' + id, JSON.stringify(l)); } catch { /* storage full */ }
-      return l;
+    function drawPosts() {
+      const up = posts.filter(isUpcoming).sort((a, b) => a.event_date.localeCompare(b.event_date));
+      const rest = posts.filter((p) => !isUpcoming(p));
+      const empty = (key) => [el('li', { class: 'empty' }, t(loaded ? key : 'loading'))];
+      $('upcoming').replaceChildren(...(up.length ? up.map(postCard) : empty('home_none_upcoming')));
+      $('news').replaceChildren(...(rest.length ? rest.slice(0, shown).map(postCard) : empty('home_none')));
+      $('moreNews').classList.toggle('hidden', rest.length <= shown);
     }
-    // patrols: the names are cached like the scout list; the patrol word (Rovers say رهط) follows the troop's theme, remembered for the first paint
-    const patrolCache = (id) => { try { return JSON.parse(localStorage.getItem('patrols_cache_' + id)) || []; } catch { return []; } };
-    async function loadPatrols(id) {
-      const p = await api('/api/patrols?troop=' + id);
-      try { localStorage.setItem('patrols_cache_' + id, JSON.stringify(p)); } catch { /* storage full */ }
-      return p;
+    // the ticker: every post marked for it (newest first, past activities and events dropped), the list repeated once so it loops without a gap
+    function drawTicker() {
+      const items = posts.filter((p) => p.ticker && (p.kind === 'news' || !p.event_date || p.event_date >= today())).slice(0, 12);
+      const set = (hidden) => el('div', { class: 'ticker-set', ...(hidden ? { 'aria-hidden': 'true' } : {}) }, items.map((p) => el('a', { href: '#p' + p.id, dir: 'auto', ...(hidden ? { tabindex: '-1' } : {}) }, p.title)));
+      $('tickerTrack').replaceChildren(set(false), set(true));
+      // nothing marked for the ticker: it stays, with a plain note instead of scrolling headlines
+      $('ticker').classList.toggle('ticker-empty', !items.length);
+      if (!items.length) $('tickerTrack').replaceChildren(el('div', { class: 'ticker-set' }, el('span', { class: 'ticker-note' }, t('home_ticker_empty'))));
+      $('ticker').classList.toggle('hidden', !loaded); // (shown once the posts have loaded)
+      tickerSpeed(items);
     }
-    function useTroopWord(id) {
-      const tr = troops.find((x) => x.id === id);
-      // does this troop use XP? (remembered like the theme, for the first paint before the troop list is loaded)
-      if (tr) { try { localStorage.setItem('xp_' + id, tr.xp_enabled === false ? '0' : '1'); } catch { /* ignore */ } setXpEnabled(tr.xp_enabled); }
-      else { let c = null; try { c = localStorage.getItem('xp_' + id); } catch { /* ignore */ } setXpEnabled(c !== '0'); }
-      const th = tr?.theme;
-      if (th) { try { localStorage.setItem('unit_theme_' + id, th); } catch { /* ignore */ } setUnitTheme(th); setTroopTint(th); }
-      else { let c = null; try { c = localStorage.getItem('unit_theme_' + id); } catch { /* ignore */ } setUnitTheme(c); setTroopTint(c); }
+    // how long one lap takes. Desktop: longer text, slower lap (at least 20 s). Phones: a lap is the width of the set (at least the narrow screen), so the
+    // same time would crawl; there the lap is timed by distance, a steady 60 px per second
+    let tickerItems = [];
+    function tickerSpeed(items = tickerItems) {
+      tickerItems = items;
+      const track = $('tickerTrack'), set = track.firstElementChild;
+      if (!set || !items.length) return; // (nothing scrolls without headlines)
+      const phone = matchMedia('(max-width: 760px)').matches;
+      const secs = phone ? set.offsetWidth / 60 : Math.max(20, items.reduce((n, p) => n + p.title.length + 6, 0) * 0.28);
+      track.style.animationDuration = Math.max(6, secs) + 's';
     }
-    async function switchTroop(id, keepScout) {
-      troop = id; try { localStorage.setItem('troop', id); } catch { /* ignore */ }
-      useTroopWord(id); patrols = patrolCache(id);
-      picker.value = String(id);
-      if (!keepScout) { current = null; data = null; loading = false; history.replaceState(null, '', location.pathname); drawDetail(); }
-      scouts = listCache(id);
-      if (scouts.length) drawList(); else listEl.replaceChildren(el('li', { class: 'empty', style: 'padding:.75rem .5rem' }, t('loading')));
-      const [fresh, freshP] = await Promise.all([loadList(id).catch(() => null), loadPatrols(id).catch(() => null)]);
-      if (troop !== id) return; // the visitor already picked another troop
-      if (freshP) patrols = freshP;
-      if (fresh && JSON.stringify(fresh) !== JSON.stringify(scouts)) scouts = fresh;
-      drawList();
+    addEventListener('resize', frame(() => tickerSpeed())); // (turning the phone, resizing a window)
+    // a ticker headline opens its post: scroll to it (showing the whole list first if it is further down) and flash it
+    $('ticker').addEventListener('click', (ev) => {
+      const a = ev.target.closest('a'); if (!a) return;
+      ev.preventDefault();
+      const id = a.getAttribute('href').slice(1);
+      if (!$(id)) { shown = Infinity; drawPosts(); }
+      const card = $(id); if (!card) return;
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash');
+    });
+    $('moreNews').addEventListener('click', () => { shown += 12; drawPosts(); });
+
+    // ---- writing posts ----
+    // the troops a post is about, as tick boxes: the super admin and leaders can tick All troops or any set; an admin always has its own troop ticked (and locked)
+    // and may tick the other troops that take part (the server enforces the same). fillTroopChoice({ all, ids }) sets them; without an argument what is ticked now stays
+    const troopChoice = () => { const box = $('postTroops'); return { all: !!box.querySelector('input[data-troop=all]:checked'), ids: [...box.querySelectorAll('input:checked:not([data-troop=all])')].map((i) => Number(i.dataset.troop)) }; };
+    function syncAllBox() { // All troops ticked: the single troops are covered, so they are cleared and locked
+      const box = $('postTroops'), a = box.querySelector('input[data-troop=all]');
+      if (a) box.querySelectorAll('input:not([data-troop=all])').forEach((i) => { if (a.checked) i.checked = false; i.disabled = a.checked; });
     }
-    picker.addEventListener('change', () => switchTroop(Number(picker.value)));
-    document.addEventListener('langchange', () => { if (troops.length) drawPicker(); drawList(); drawDetail(); });
+    $('postTroops').addEventListener('change', syncAllBox);
+    function fillTroopChoice(sel) {
+      const cur = sel || troopChoice(), own = (x) => !roams() && x.id === me?.troop_id;
+      const row = (value, label, checked, locked) => el('label', { class: 'inline-check' }, el('input', { type: 'checkbox', 'data-troop': value, ...(checked ? { checked: '' } : {}), ...(locked ? { disabled: '' } : {}) }), ' ', label);
+      $('postTroops').replaceChildren(...(roams() ? [row('all', t('post_aud_all'), cur.all, false)] : []), ...troops.map((x) => row(String(x.id), troopLabel(x), cur.ids.includes(x.id) || own(x), own(x))));
+      syncAllBox();
+      $('postTroopLabel').classList.toggle('hidden', !isPoster());
+    }
+    function openForm(p) {
+      editing = p ? p.id : null;
+      const f = $('postForm').elements;
+      $('postForm').reset();
+      fillTroopChoice(p ? { all: p.troop_ids.length === 0, ids: p.troop_ids } : { all: roams(), ids: [] }); // a new post: All troops for the super admin and leaders, the admin's own troop for an admin
+      if (p) { f.kind.value = p.kind; f.event_date.value = p.event_date || ''; f.title.value = p.title; f.body.value = p.body || ''; f.ticker.checked = p.ticker; f.pinned.checked = p.pinned; }
+      $('postFormTitle').dataset.i18n = p ? 'post_edit' : 'post_new'; $('postFormTitle').textContent = t(p ? 'post_edit' : 'post_new');
+      $('postForm').classList.remove('hidden'); $('addPostBtn').setAttribute('aria-expanded', 'true');
+      $('postForm').scrollIntoView({ behavior: 'smooth', block: 'start' });
+      f.title.focus({ preventScroll: true });
+    }
+    function closeForm() { editing = null; $('postForm').reset(); $('postForm').classList.add('hidden'); $('addPostBtn').setAttribute('aria-expanded', 'false'); }
+    $('addPostBtn').addEventListener('click', () => { if ($('postForm').classList.contains('hidden') || editing) openForm(); else closeForm(); });
+    $('postCancel').addEventListener('click', closeForm);
+    $('postForm').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const f = ev.target.elements;
+      const body = { kind: f.kind.value, title: f.title.value, body: f.body.value, event_date: f.event_date.value || null, ticker: f.ticker.checked, pinned: f.pinned.checked };
+      const c = troopChoice();
+      if (!c.all && !c.ids.length) { msg(t('post_pick_troop')); return; } // at least one troop, or all of them
+      body.troop_ids = c.all ? [] : c.ids; // empty = all troops
+      try {
+        if (editing) await api('/api/posts/' + editing, 'PUT', body); else await api('/api/posts', 'POST', body);
+        closeForm(); msg(t('saved'), true); await loadPosts();
+      } catch (e) { msg(errText(e)); }
+    });
+
+    // one home page for everyone: all the posts (each may say which troop it is about)
+    async function loadPosts() {
+      posts = (await api('/api/posts').catch(() => null)) || posts;
+      loaded = true; drawPosts(); drawTicker();
+    }
+    document.addEventListener('langchange', () => { drawPosts(); drawTicker(); if (isPoster()) fillTroopChoice(); });
 
     (async () => {
-      // show the last list we saw immediately, then swap in the fresh one (no empty screen on repeat visits)
-      const saved = parseInt(localStorage.getItem('troop'), 10) || null; // the troop this visitor looked at last time
+      // old links to a scout's page ("/#12") now live on the scout list
+      if (/^#\d+$/.test(location.hash)) { location.replace('/scouts.html' + location.hash); return; }
       const troopsReq = api('/api/troops').catch(() => []);
-      const freshReq = saved ? loadList(saved).catch(() => null) : null; // start loading it now, in parallel
-      const freshPReq = saved ? loadPatrols(saved).catch(() => null) : null;
       await initLang();
-      me = await getMe(); staff = !!me; // signed in? (also decides whether a scout's private details are fetched)
-      if (saved && listCache(saved).length) { troop = saved; scouts = listCache(saved); patrols = patrolCache(saved); useTroopWord(saved); drawList(); }
       troops = await troopsReq;
-      const want = troops.some((x) => x.id === saved) ? saved : troops[0]?.id;
-      if (want) { troop = want; useTroopWord(want); drawPicker(); }
-      const fresh = want === saved && freshReq ? await freshReq : want ? await loadList(want).catch(() => null) : [];
-      const freshP = want === saved && freshPReq ? await freshPReq : want ? await loadPatrols(want).catch(() => null) : [];
-      scouts = fresh || (want === saved ? scouts : []);
-      patrols = freshP || (want === saved ? patrols : []);
-      drawList();
-      const id = parseInt(location.hash.slice(1), 10);
-      if (id) openScout(id); else drawDetail();
+      await loadPosts();
+      me = await getMe();
+      if (me) $('quickReports').classList.remove('hidden'); // the weekly reports are for signed-in accounts
+      if (isPoster()) { $('postTools').classList.remove('hidden'); fillTroopChoice({ all: roams(), ids: [] }); drawPosts(); } // (the posts are drawn again, now with Edit and Delete)
     })();
   </script>
 </body>

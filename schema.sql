@@ -143,7 +143,7 @@ CREATE INDEX IF NOT EXISTS scouts_patrol_idx ON scouts(patrol_id);
 CREATE INDEX IF NOT EXISTS activities_troop_idx ON activities(troop_id);
 CREATE INDEX IF NOT EXISTS labels_troop_idx ON labels(troop_id);
 
--- account level "mod" (مسؤول): sees only the members and their activity
+-- account level "mod" (رائد): sees only the members of its own patrol and their activity
 ALTER TABLE leaders DROP CONSTRAINT IF EXISTS leaders_role_check;
 ALTER TABLE leaders ADD CONSTRAINT leaders_role_check CHECK (role IN ('super_admin', 'admin', 'leader', 'mod'));
 
@@ -194,6 +194,11 @@ CREATE TABLE IF NOT EXISTS meeting_absences (
 ALTER TABLE meeting_absences ADD COLUMN IF NOT EXISTS excused BOOLEAN NOT NULL DEFAULT false;
 ALTER TABLE xp_log ADD COLUMN IF NOT EXISTS meeting_id INT REFERENCES meetings(id) ON DELETE CASCADE;
 CREATE UNIQUE INDEX IF NOT EXISTS xp_log_meeting_scout_idx ON xp_log(meeting_id, scout_id) WHERE meeting_id IS NOT NULL;
+-- patrol meetings (kind 'patrol'): a meeting of one patrol (patrol_id), whose sheet lists only that patrol's scouts. A mod adds these for its own patrol.
+-- (if the patrol is deleted the meeting stays, with no patrol)
+ALTER TABLE meetings DROP CONSTRAINT IF EXISTS meetings_kind_check;
+ALTER TABLE meetings ADD CONSTRAINT meetings_kind_check CHECK (kind IN ('meeting', 'event', 'patrol'));
+ALTER TABLE meetings ADD COLUMN IF NOT EXISTS patrol_id INT REFERENCES patrols(id) ON DELETE SET NULL;
 
 -- the scout lists check for every scout whether it belongs to a leader account
 CREATE INDEX IF NOT EXISTS leaders_scout_idx ON leaders(scout_id);
@@ -245,3 +250,47 @@ END $$;
 
 -- session version: every login cookie carries it; changing or resetting the password raises it, which signs out all older sessions
 ALTER TABLE leaders ADD COLUMN IF NOT EXISTS session_v INT NOT NULL DEFAULT 0;
+
+-- home page: news, activities and events. troop_id NULL = shown in every troop. ticker = also scrolls in the news ticker; pinned = listed first.
+-- event_date (optional) is the day of an activity or event: upcoming ones are listed under "Coming up"
+CREATE TABLE IF NOT EXISTS posts (
+  id SERIAL PRIMARY KEY,
+  troop_id INT REFERENCES troops(id) ON DELETE CASCADE,
+  kind TEXT NOT NULL DEFAULT 'news' CHECK (kind IN ('news', 'activity', 'event')),
+  title TEXT NOT NULL,
+  body TEXT,
+  event_date DATE,
+  ticker BOOLEAN NOT NULL DEFAULT false,
+  pinned BOOLEAN NOT NULL DEFAULT false,
+  created_by INT REFERENCES leaders(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS posts_troop_idx ON posts(troop_id, created_at DESC);
+
+-- weekly reports: what a troop did at its weekly meeting (Saturday). One per troop and week; week_date is the Saturday.
+CREATE TABLE IF NOT EXISTS weekly_reports (
+  id SERIAL PRIMARY KEY,
+  troop_id INT NOT NULL REFERENCES troops(id) ON DELETE CASCADE,
+  week_date DATE NOT NULL,
+  body TEXT NOT NULL,
+  created_by INT REFERENCES leaders(id) ON DELETE SET NULL,
+  updated_by INT REFERENCES leaders(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  UNIQUE (troop_id, week_date)
+);
+
+-- a post can be about one troop, several (a joint event) or all: post_troops lists them, no rows = all troops. (posts.troop_id is the old single-troop column:
+-- what it held is copied here once and the column is emptied, and nothing reads it any more)
+CREATE TABLE IF NOT EXISTS post_troops (
+  post_id INT NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  troop_id INT NOT NULL REFERENCES troops(id) ON DELETE CASCADE,
+  PRIMARY KEY (post_id, troop_id)
+);
+INSERT INTO post_troops (post_id, troop_id) SELECT id, troop_id FROM posts WHERE troop_id IS NOT NULL ON CONFLICT DO NOTHING;
+UPDATE posts SET troop_id = NULL WHERE troop_id IS NOT NULL;
+
+-- a troop's slogan ("Always Prepared"), shown next to the troop's name in the leader area
+ALTER TABLE troops ADD COLUMN IF NOT EXISTS slogan_en TEXT;
+ALTER TABLE troops ADD COLUMN IF NOT EXISTS slogan_ar TEXT;

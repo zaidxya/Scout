@@ -569,3 +569,77 @@ header .menu-list a.signin { margin-top: .25rem; border-top: 1px solid var(--lin
   .cols:not(.show-detail) > section:nth-of-type(2) { display: none; } /* the list alone until a scout is opened (the page no longer sits under the list) */
   .cols.show-detail > .back-list { display: inline-flex; align-items: center; position: sticky; top: .5rem; z-index: 5; justify-self: start; margin: 0 0 .25rem; background: var(--paper); box-shadow: 0 2px 8px rgba(var(--primary-rgb), .15); }
 }
+
+/* Administration group inside the header menu (super admin) */
+header .menu-list .menu-head { margin-top: .25rem; padding: .5rem 1rem .2rem; border-top: 1px solid var(--line); font-size: .8rem; font-weight: 700; color: var(--muted); }
+/* strip shown while the super admin views the site as another account */
+.view-banner { position: sticky; top: 0; z-index: 50; display: flex; align-items: center; justify-content: center; gap: .8rem; flex-wrap: wrap; padding: .45rem 1rem; background: #fff1c7; color: #5a4300; border-bottom: 1px solid #e3c25c; font-weight: 700; }
+.view-banner button { font: inherit; font-weight: 700; cursor: pointer; border: 1px solid #a98100; border-radius: 8px; background: #fff; color: #5a4300; padding: .15rem .7rem; }
+
+/* ---------- home page: news ticker, quick links, news and upcoming ---------- */
+.ticker { display: flex; align-items: stretch; background: var(--primary); color: var(--on-primary); border-bottom: 3px solid var(--accent); overflow: hidden; }
+.ticker-label { flex: none; display: flex; align-items: center; padding: .5rem 1rem; font-weight: 800; background: rgba(var(--ink-rgb), .35); white-space: nowrap; }
+.ticker-view { flex: 1; min-width: 0; overflow: hidden; display: flex; align-items: center; }
+.ticker-track { display: flex; width: max-content; animation: ticker-run 40s linear infinite; }
+.ticker-view:hover .ticker-track, .ticker-view:focus-within .ticker-track { animation-play-state: paused; }
+.ticker-set { display: flex; flex: none; min-width: 100vw; }
+.ticker-set a { color: inherit; text-decoration: none; white-space: nowrap; font-weight: 600; padding: .55rem 0; }
+.ticker-set a::before { content: '\25C6'; margin-inline: 1.4rem; color: var(--accent); font-size: .7rem; vertical-align: middle; }
+.ticker-set a:hover { text-decoration: underline; }
+@keyframes ticker-run { to { transform: translateX(50%); } } /* the page is always right to left: the track slides on in reading direction, the second copy lands where the first began */
+@media (prefers-reduced-motion: reduce) {
+  .ticker-track { animation: none; width: auto; }
+  .ticker-set { min-width: 0; flex-wrap: wrap; }
+  .ticker-set[aria-hidden=true] { display: none; }
+}
+.home-bar { display: flex; align-items: center; gap: .8rem; flex-wrap: wrap; margin-bottom: 1rem; }
+.home-bar:not(:has(*:not(.hidden))) { display: none; }
+.home-bar select { width: auto; min-width: 12rem; font-weight: 700; }
+.quick { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: .9rem; margin-bottom: 1.25rem; }
+.quick-card { display: block; padding: 1rem 1.2rem; border-radius: 12px; background: var(--primary); color: var(--on-primary); text-decoration: none; }
+.quick-card:hover { background: var(--primary-hover); }
+.quick-card b { display: block; font-size: 1.1rem; }
+.quick-card small { opacity: .85; }
+.home-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr); gap: 1.25rem; align-items: start; }
+@media (max-width: 760px) { .home-cols { grid-template-columns: minmax(0, 1fr); } }
+.posts { list-style: none; margin: 0 0 .5rem; padding: 0; display: flex; flex-direction: column; gap: .9rem; }
+.post { border: 1px solid var(--line); border-radius: 10px; padding: .85rem 1rem; background: var(--bg); }
+.post.pinned { border-color: var(--primary); }
+.post h3 { margin: .45rem 0 .3rem; font-size: 1.05rem; }
+.post-meta { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+.post-meta small { margin-inline-start: auto; color: var(--muted); }
+.post-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.post.flash { animation: post-flash 1.6s ease; }
+@keyframes post-flash { from { background: var(--accent-soft); box-shadow: 0 0 0 3px var(--accent); } }
+/* weekly reports: a troop with no report yet that week */
+.post.report-none { background: transparent; border-style: dashed; }
+/* the ticker with nothing to scroll: a plain note */
+.ticker-empty .ticker-track { animation: none; width: auto; }
+.ticker-empty .ticker-set { min-width: 0; }
+.ticker-note { padding: .55rem 1.4rem; font-weight: 600; opacity: .9; }
+/* the troops a post is about (tick boxes) */
+.troop-pick { border: 1px solid var(--line); border-radius: 10px; padding: .4rem .9rem .7rem; margin: .8rem 0; min-width: 0; }
+.troop-pick legend { font-weight: 700; padding: 0 .4rem; color: var(--muted); }
+.troop-pick .hint { margin: .1rem 0 .3rem; }
+.troop-checks { display: flex; flex-wrap: wrap; gap: .1rem 1.4rem; }
+/* phones: the quick links are small buttons without their descriptions */
+@media (max-width: 760px) {
+  .quick { grid-template-columns: repeat(auto-fit, minmax(6.5rem, 1fr)); gap: .5rem; margin-bottom: 1rem; }
+  .quick-card { display: flex; align-items: center; justify-content: center; min-height: 2.8rem; padding: .5rem .6rem; border-radius: 10px; text-align: center; }
+  .quick-card b { font-size: .95rem; line-height: 1.25; }
+  .quick-card small { display: none; }
+}
+
+/* activity log (Administration): days, then one quiet row per entry */
+.log-day { margin: 1.3rem 0 .4rem; font-size: .85rem; font-weight: 700; color: var(--muted); }
+.log-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--paper); }
+.log-row { display: flex; align-items: center; gap: .7rem; padding: .5rem .85rem; border-top: 1px solid var(--line); }
+.log-row:first-child { border-top: 0; }
+.log-time { flex: none; width: 3.4rem; font-size: .8rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.log-dot { flex: none; width: .6rem; height: .6rem; border-radius: 50%; background: var(--dot, var(--primary)); }
+.log-text { flex: 1; min-width: 0; overflow-wrap: anywhere; line-height: 1.45; }
+.log-row .chip { flex: none; }
+
+/* the troop's slogan, in the header right beside the troop's name (leader area) */
+header .brand .brand-slogan { align-self: center; padding-inline-start: .7rem; border-inline-start: 1px solid rgba(var(--on-primary-rgb), .45); font-size: .8rem; font-weight: 600; font-style: italic; line-height: 1.25; opacity: .9; white-space: normal; max-width: 12rem; }
+@media (max-width: 760px) { header .brand .brand-slogan { font-size: .72rem; max-width: 8.5rem; padding-inline-start: .5rem; } }

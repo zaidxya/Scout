@@ -1,10 +1,12 @@
 <!doctype html>
-<html lang="ar" dir="rtl" data-title="title_scouts">
+<html lang="ar" dir="rtl" data-title="title_dashboard">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>إدارة الكشافة</title>
-  <link rel="icon" href="/favicon.png">
+  <title>كشاف الفوج الثاني</title>
+  <link rel="icon" type="image/png" sizes="192x192" href="/favicon-v2.png">
+  <link rel="apple-touch-icon" href="/favicon-v2.png">
+  <meta name="theme-color" content="#671e93">
   <script>document.documentElement.classList.add('js')</script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -13,246 +15,145 @@
 </head>
 <body>
   <header>
-    <div class="grow"><h1><a href="/" style="border:0;padding:0"><img src="/logo.jpg" alt="جولات"></a></h1><p data-i18n="scout_mgmt"></p><p id="meName" dir="auto" style="font-weight:700;opacity:1;padding-inline-end:1rem;border-inline-end:1px solid rgba(211,173,128,.5)"></p></div>
+    <div class="grow"><h1><a class="brand" href="/"><img src="/logo-mark.png" alt=""><span data-i18n="title"></span></a></h1><p data-i18n="subtitle"></p></div>
     <nav>
-      <a href="/" data-i18n="home">Dashboard</a>
-      <a href="/leader.html" data-i18n="leader_area"></a>
-      <button id="logoutBtn" type="button" class="hidden" data-i18n="logout"></button>
+      <details class="menu" data-page="scouts"></details>
       <button id="langBtn" type="button" class="lang" data-i18n="lang_toggle">العربية</button>
     </nav>
   </header>
-  <main>
-    <form id="loginForm" class="panel login">
-      <h2 data-i18n="login_title"></h2>
-      <label><span data-i18n="username"></span><input name="username" type="text" autocomplete="username" required></label>
-      <label><span data-i18n="password"></span><input name="password" type="password" autocomplete="current-password" required></label>
-      <button class="btn" type="submit" data-i18n="login"></button>
-      <p id="loginErr" class="error" role="alert"></p>
-    </form>
-
-    <div id="app" class="hidden">
-      <p id="toast" class="error" role="status"></p>
-
-      <div class="cols">
-        <section>
-          <select id="troopFilter" class="hidden"></select>
-          <form id="addForm" class="panel">
-            <h2 data-i18n="add_scout"></h2>
-            <div class="row">
-              <input name="name" type="text" maxlength="60" data-i18n-ph="scout_name" aria-label="Scout name" required>
-              <select name="troop_id" id="addTroop" class="hidden" aria-label="Troop" style="max-width:9rem"></select>
-              <button class="btn" type="submit" data-i18n="add"></button>
-            </div>
-          </form>
-          <input id="q" type="search" data-i18n-ph="search_leader" aria-label="Search">
-          <ul id="list" class="scout-list"></ul>
-        </section>
-        <section id="right" class="detail"></section>
-      </div>
-    </div>
+  <main class="cols">
+    <button id="backList" class="btn ghost small back-list" type="button" data-i18n="back_to_list"></button>
+    <section>
+      <select id="troopPick" class="hidden"></select>
+      <input id="search" type="search" data-i18n-ph="search" aria-label="Search">
+      <ul id="list" class="scout-list"></ul>
+    </section>
+    <section id="detail" class="detail"></section>
   </main>
   <script src="/common.js"></script>
-  <script src="/leader-common.js"></script>
   <script>
-    let scouts = [], current = null, data = null, det = null, acts = [], labels = [], troops = [];
-
-    // ---------- scouts ----------
-    const labelName = (l) => (state.lang === 'ar' ? l.name_ar : l.name_en);
-    const labelById = (id) => labels.find((l) => l.id === id);
-    async function loadScouts() { scouts = await api('/api/leader/scouts'); drawList(); }
-
-    // search matches name, full name, phone, and the names of assigned roles/tags (both languages)
-    function matches(s, q) {
-      if (!q) return true;
-      const names = s.label_ids.map(labelById).filter(Boolean).flatMap((l) => [l.name_en, l.name_ar]);
-      return [s.name, s.full_name, s.phone, ...names].some((v) => norm(v).includes(q));
-    }
-    function chips(ids) {
-      return el('span', { class: 'chips' }, ids.map(labelById).filter(Boolean)
-        .map((l) => el('span', { class: 'chip ' + l.kind, style: chipStyle(l) }, labelName(l))));
-    }
-    // ---------- troops (names, pickers) ----------
-    const troopName = (tr) => (tr ? (state.lang === 'ar' ? tr.name_ar : tr.name_en) : '');
-    const troopById = (id) => troops.find((x) => x.id === id);
-    const multiTroop = () => troops.length > 1;
-    // fill the troop dropdowns (filter above the scout list, add-scout), keeping what was selected
-    function fillTroopSelects() {
-      const opts = () => troops.map((x) => el('option', { value: String(x.id) }, troopName(x)));
-      const fill = (sel, extra, fallback) => {
-        const keep = sel.value || fallback;
-        sel.replaceChildren(...extra, ...opts());
-        if ([...sel.options].some((o) => o.value === String(keep))) sel.value = String(keep);
-      };
-      fill($('troopFilter'), [el('option', { value: '' }, t('troop_all'))], '');
-      fill($('addTroop'), [], $('troopFilter').value || session.troop);
-      const show = isSuper() && multiTroop();
-      ['troopFilter', 'addTroop'].forEach((id) => $(id).classList.toggle('hidden', !show));
-      $('troopFilter').setAttribute('aria-label', t('troop_picker'));
-    }
-    $('troopFilter').addEventListener('change', () => { if ($('troopFilter').value) $('addTroop').value = $('troopFilter').value; drawList(); });
+    const listEl = document.getElementById('list'), detailEl = document.getElementById('detail'), search = document.getElementById('search');
+    let scouts = [], patrols = [], troops = [], troop = null, current = null, data = null;
+    let staff = false, me = null, priv = null; // staff: a signed-in account sees the scout's private details (read-only); editing stays in the leader area
+    const privCache = {};
+    const picker = document.getElementById('troopPick');
+    const detailCache = {}; // last seen detail per scout, shown instantly while the fresh copy loads
 
     function drawList() {
-      const q = norm($('q').value.trim());
-      const tf = isSuper() ? $('troopFilter').value : '';
-      const shown = scouts.filter((s) => (!tf || String(s.troop_id) === tf) && matches(s, q));
-      renderScoutList($('list'), shown, current, (id) => openScout(id),
-        (s) => el('span', { class: 'sub' }, chips(s.label_ids),
-          isSuper() && multiTroop() && !tf ? el('span', { class: 'troop-tag' }, troopName(troopById(s.troop_id))) : ''),
-        scouts.length ? 'no_results' : 'no_scouts');
+      const q = norm(search.value.trim());
+      const hit = (s) => { const p = patrols.find((x) => x.id === s.patrol_id); return [s.name, p?.name_en, p?.name_ar, ...(s.roles || []).flatMap((r) => [r.name_en, r.name_ar])].some((v) => norm(v).includes(q)); };
+      renderScoutList(listEl, scouts.filter(hit), current, openScout, (s) => el('span', { class: 'sub' }, roleChips(s.roles)), scouts.length ? 'no_results' : 'no_scouts', patrols); // split under a heading per patrol when the troop has any
     }
-    $('q').addEventListener('input', frame(drawList));
-
-    async function openScout(id, scrollNext = true) {
-      current = id; drawList();
-      try {
-        [data, det] = await Promise.all([api('/api/scouts/' + id), api('/api/leader/scouts/' + id), loadActsQuiet()]);
-      } catch (e) { data = det = null; fail(e); }
-      drawDetail();
-      if (scrollNext && matchMedia('(max-width: 760px)').matches) $('right').scrollIntoView({ block: 'start', behavior: 'smooth' });
-    }
-    async function loadActsQuiet() { if (!acts.length) acts = await api('/api/activities'); }
-
-    // phone fields accept digits only (Arabic-Indic digits are converted to 0-9)
-    const digitsOnly = (v) => String(v || '').replace(/[٠-٩]/g, (d) => d.charCodeAt(0) - 0x660).replace(/[۰-۹]/g, (d) => d.charCodeAt(0) - 0x6f0).replace(/\D/g, '');
-    function field(key, name, value, type = 'text', extra = {}) {
-      if (type === 'tel') {
-        const input = el('input', { name, type: 'tel', class: 'phone', inputmode: 'numeric', pattern: '[0-9]*', placeholder: '0000000000', maxlength: extra.max || 40, value: digitsOnly(value), dir: 'ltr' });
-        input.addEventListener('input', () => { const v = digitsOnly(input.value); if (v !== input.value) input.value = v; });
-        return el('label', {}, t(key), input);
-      }
-      const input = type === 'textarea'
-        ? el('textarea', { name, maxlength: extra.max || 1000 }, value || '')
-        : el('input', { name, type, maxlength: extra.max || 120, value: value || '', ...(extra.required ? { required: '' } : {}) });
-      return el('label', {}, t(key), input);
-    }
-
-    function resizeImage(file, size = 256) {
-      return new Promise((resolve, reject) => {
-        const img = new Image(), url = URL.createObjectURL(file);
-        img.onload = () => {
-          const s = Math.min(img.width, img.height), c = document.createElement('canvas');
-          c.width = c.height = size;
-          c.getContext('2d').drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, size, size);
-          URL.revokeObjectURL(url);
-          resolve(c.toDataURL('image/jpeg', 0.85));
-        };
-        img.onerror = () => reject(Object.assign(new Error('invalid_input'), { code: 'invalid_input' }));
-        img.src = url;
-      });
-    }
-
+    let loading = false;
     function drawDetail() {
-      const box = $('right');
-      box.replaceChildren();
-      if (!data || !det) return box.append(el('p', { class: 'empty' }, t('select_scout')));
-      const refresh = async () => { await loadScouts(); await openScout(data.id, false); };
-
-      // award XP from the activity list
-      const sel = el('select', { name: 'activity_id', required: '', 'aria-label': t('activity_select') },
-        el('option', { value: '' }, t('activity_select')),
-        acts.map((a) => el('option', { value: a.id }, `${state.lang === 'ar' ? a.name_ar : a.name_en} (${signed(a.xp)} ${t('xp')})`)));
-      const awardForm = el('form', { class: 'panel' },
-        el('h2', {}, t('award_xp')),
-        el('label', {}, t('activity_select'), sel),
-        el('label', {}, t('activity_date'), el('input', { name: 'date', type: 'date', required: '', value: new Date().toLocaleDateString('en-CA'), max: new Date().toLocaleDateString('en-CA') })),
-        el('label', {}, t('note'), el('input', { name: 'note', type: 'text', maxlength: '200' })),
-        el('button', { class: 'btn', type: 'submit' }, t('award')));
-      awardForm.addEventListener('submit', async (ev) => {
-        ev.preventDefault();
-        const f = new FormData(awardForm);
-        try { await api(`/api/scouts/${data.id}/xp`, 'POST', { activity_id: Number(f.get('activity_id')), date: f.get('date'), note: f.get('note') }); msg(''); await refresh(); }
-        catch (e) { fail(e); }
-      });
-
-      // roles and tags
-      const mine = (scouts.find((s) => s.id === data.id) || { label_ids: [] }).label_ids;
-      const saveLabels = async (ids) => {
-        try { await api(`/api/scouts/${data.id}/labels`, 'PUT', { label_ids: ids }); msg(''); await refresh(); } catch (e) { fail(e); }
-      };
-      const labelBlock = (kind, titleKey) => {
-        const own = labels.filter((l) => l.kind === kind && mine.includes(l.id));
-        const free = labels.filter((l) => l.kind === kind && !mine.includes(l.id));
-        const pick = el('select', { 'aria-label': t(titleKey) }, el('option', { value: '' }, t('add_to_scout')),
-          free.map((l) => el('option', { value: l.id }, labelName(l))));
-        pick.addEventListener('change', () => { if (pick.value) saveLabels([...mine, Number(pick.value)]); });
-        return el('div', { style: 'margin-bottom:.9rem' }, el('h3', {}, t(titleKey)),
-          own.length ? el('div', { class: 'chips big' }, own.map((l) => el('span', { class: 'chip ' + kind, style: chipStyle(l) },
-            labelName(l), el('button', { type: 'button', 'aria-label': t('remove'), onclick: () => saveLabels(mine.filter((i) => i !== l.id)) }, '×'))))
-            : el('p', { class: 'empty', style: 'margin:.2rem 0' }, t('no_labels')),
-          free.length ? pick : '');
-      };
-      const labelsPanel = el('div', { class: 'panel' }, labelBlock('role', 'roles'), labelBlock('tag', 'tags'));
-
-      // photo
-      const file = el('input', { type: 'file', accept: 'image/*', class: 'hidden' });
-      file.addEventListener('change', async () => {
-        if (!file.files[0]) return;
-        try { await api(`/api/scouts/${data.id}/photo`, 'PUT', { image: await resizeImage(file.files[0]) }); msg(''); await refresh(); }
-        catch (e) { fail(e); }
-      });
-      const photoRow = el('div', { class: 'row', style: 'margin-bottom:1rem' },
-        avatar(data, true),
-        el('button', { class: 'btn ghost small', type: 'button', onclick: () => file.click() }, t('change_photo')),
-        data.has_photo ? el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
-          try { await api(`/api/scouts/${data.id}/photo`, 'DELETE'); await refresh(); } catch (e) { fail(e); }
-        } }, t('remove_photo')) : '', file);
-
-      // details (public name + private fields)
-      const form = el('form', { class: 'panel' },
-        el('h2', {}, t('details')), photoRow,
-        field('d_name', 'name', det.name, 'text', { max: 60, required: true }),
-        el('p', { class: 'hint' }, t('public_field')),
-        el('p', { class: 'hint private' }, t('private_section')),
-        el('div', { class: 'grid2' },
-          field('d_full_name', 'full_name', det.full_name),
-          field('d_phone', 'phone', det.phone, 'tel', { max: 40 }),
-          field('d_join_date', 'join_date', det.join_date, 'date'),
-          field('d_birth_date', 'birth_date', det.birth_date, 'date'),
-          field('d_guardian_name', 'guardian_name', det.guardian_name),
-          field('d_guardian_phone', 'guardian_phone', det.guardian_phone, 'tel', { max: 40 })),
-        field('d_address', 'address', det.address, 'textarea', { max: 300 }),
-        field('d_medical', 'medical_notes', det.medical_notes, 'textarea'),
-        field('d_notes', 'notes', det.notes, 'textarea'),
-        el('button', { class: 'btn', type: 'submit' }, t('save')));
-      form.addEventListener('submit', async (ev) => {
-        ev.preventDefault();
-        try { await api('/api/scouts/' + data.id, 'PUT', Object.fromEntries(new FormData(form))); await refresh(); msg(t('saved'), true); }
-        catch (e) { fail(e); }
-      });
-
-      const del = el('button', { class: 'btn quiet', type: 'button', style: 'margin-top:1.5rem', onclick: async () => {
-        if (!(await confirmBox(t('confirm_delete'), t('delete_scout')))) return;
-        try { await api('/api/scouts/' + data.id, 'DELETE'); current = null; data = det = null; await loadScouts(); drawDetail(); }
-        catch (e) { fail(e); }
-      } }, t('delete_scout'));
-
-      box.append(renderDetailHead(data, false), awardForm, labelsPanel,
-        renderLog(data, async (xpId) => {
-          if (!(await confirmBox(t('confirm_undo'), t('undo')))) return;
-          try { await api('/api/xp/' + xpId, 'DELETE'); await refresh(); } catch (e) { fail(e); }
-        }),
-        el('div', { style: 'height:1.25rem' }), form, del);
+      detailEl.replaceChildren();
+      if (loading) return detailEl.append(el('p', { class: 'empty' }, t('loading')));
+      if (!data) return detailEl.append(el('p', { class: 'empty' }, t('select_scout')));
+      detailEl.append(renderDetailHead(data), ...(priv && priv.id === data.id ? [privateCard(priv)] : []), renderLog(data));
     }
-
-    $('addForm').addEventListener('submit', async (ev) => {
-      ev.preventDefault();
+    // the private details as plain text: signed-in accounts only, and only for scouts the account may open (its own troop; all troops for the super admin and leaders)
+    const PRIV = [['d_full_name', 'full_name'], ['d_phone', 'phone', 'tel'], ['d_join_date', 'join_date', 'day'], ['d_birth_date', 'birth_date', 'day'],
+      ['d_guardian_name', 'guardian_name'], ['d_guardian_phone', 'guardian_phone', 'tel'], ['d_address', 'address'], ['d_medical', 'medical_notes'], ['d_notes', 'notes']];
+    function privateCard(p) {
+      const rows = PRIV.filter(([, k]) => p[k]).flatMap(([label, k, kind]) => [
+        el('dt', {}, t(label)),
+        el('dd', {}, el('bdi', {}, kind === 'tel' ? el('a', { href: 'tel:' + p[k], dir: 'ltr' }, p[k]) : kind === 'day' ? fmtDay(p[k]) : p[k]))]); // dd keeps the page direction (so every value starts beside its label); bdi gives each value its own text direction
+      return el('div', { class: 'panel priv' },
+        el('h3', {}, t('private_info')),
+        el('p', { class: 'hint' }, t('private_view_hint')),
+        rows.length ? el('dl', { class: 'priv-dl' }, rows) : el('p', { class: 'empty' }, t('private_none')),
+        p.tags && p.tags.length ? el('div', {}, el('h4', {}, t('tags')), roleChips(p.tags)) : '',
+        !(me && (me.role === 'super_admin' || me.role === 'leader' || me.troop_id === p.troop_id)) ? '' : // editing is only offered where the account may edit
+        el('a', { class: 'btn ghost small', href: '/leader.html', onclick: () => { try { localStorage.setItem('leaderTroop', String(p.troop_id)); } catch { /* ignore */ } } }, t('private_edit')));
+    }
+    async function openScout(id) {
+      current = id;
+      history.replaceState(null, '', '#' + id);
+      drawList();
+      openDetailView(document.querySelector('main.cols')); // phones: the page replaces the list (no scrolling down)
+      data = detailCache[id] || null; priv = staff ? privCache[id] || null : null; loading = !data; drawDetail(); // cached copy (or a loading note) right away
+      const privReq = staff ? api('/api/leader/scouts/' + id).catch(() => null) : null; // null: another troop's scout for an admin or mod
       try {
-        const s = await api('/api/scouts', 'POST', { name: new FormData(ev.target).get('name'), troop_id: isSuper() ? Number($('addTroop').value) || session.troop : undefined });
-        const keepTroop = $('addTroop').value;
-        ev.target.reset(); $('addTroop').value = keepTroop; msg(''); await loadScouts(); await openScout(s.id);
-      } catch (e) { fail(e); }
-    });
+        const fresh = await api('/api/scouts/' + id);
+        if (current !== id) return; // the visitor already picked someone else
+        const freshPriv = privReq ? await privReq : null;
+        if (current !== id) return;
+        const changed = JSON.stringify(fresh) !== JSON.stringify(data) || JSON.stringify(freshPriv) !== JSON.stringify(priv);
+        detailCache[id] = data = fresh; privCache[id] = priv = freshPriv; loading = false;
+        if (fresh.troop_id && fresh.troop_id !== troop && troops.some((x) => x.id === fresh.troop_id)) await switchTroop(fresh.troop_id, true); // link to a scout of another troop
+        if (changed) drawDetail();
+      } catch { if (current !== id) return; if (!data) { loading = false; drawDetail(); } }
+      loading = false;
+    }
+    document.getElementById('backList').addEventListener('click', closeDetailView);
+    search.addEventListener('input', frame(drawList));
 
+    // ---- troops: one list per troop, picker only shown when there is more than one ----
+    const troopLabel = (x) => (state.lang === 'ar' ? x.name_ar : x.name_en);
+    function drawPicker() {
+      picker.replaceChildren(...troops.map((x) => el('option', { value: String(x.id) }, troopLabel(x))));
+      picker.value = String(troop);
+      picker.setAttribute('aria-label', t('troop_picker'));
+      picker.classList.toggle('hidden', troops.length < 2);
+    }
+    const listCache = (id) => { try { return JSON.parse(localStorage.getItem('scouts_cache_' + id)) || []; } catch { return []; } };
+    async function loadList(id) {
+      const l = await api('/api/scouts?troop=' + id);
+      try { localStorage.setItem('scouts_cache_' + id, JSON.stringify(l)); } catch { /* storage full */ }
+      return l;
+    }
+    // patrols: the names are cached like the scout list; the patrol word (Rovers say رهط) follows the troop's theme, remembered for the first paint
+    const patrolCache = (id) => { try { return JSON.parse(localStorage.getItem('patrols_cache_' + id)) || []; } catch { return []; } };
+    async function loadPatrols(id) {
+      const p = await api('/api/patrols?troop=' + id);
+      try { localStorage.setItem('patrols_cache_' + id, JSON.stringify(p)); } catch { /* storage full */ }
+      return p;
+    }
+    function useTroopWord(id) {
+      const tr = troops.find((x) => x.id === id);
+      // does this troop use XP? (remembered like the theme, for the first paint before the troop list is loaded)
+      if (tr) { try { localStorage.setItem('xp_' + id, tr.xp_enabled === false ? '0' : '1'); } catch { /* ignore */ } setXpEnabled(tr.xp_enabled); }
+      else { let c = null; try { c = localStorage.getItem('xp_' + id); } catch { /* ignore */ } setXpEnabled(c !== '0'); }
+      const th = tr?.theme;
+      if (th) { try { localStorage.setItem('unit_theme_' + id, th); } catch { /* ignore */ } setUnitTheme(th); setTroopTint(th); }
+      else { let c = null; try { c = localStorage.getItem('unit_theme_' + id); } catch { /* ignore */ } setUnitTheme(c); setTroopTint(c); }
+    }
+    async function switchTroop(id, keepScout) {
+      troop = id; try { localStorage.setItem('troop', id); } catch { /* ignore */ }
+      useTroopWord(id); patrols = patrolCache(id);
+      picker.value = String(id);
+      if (!keepScout) { current = null; data = null; loading = false; history.replaceState(null, '', location.pathname); drawDetail(); }
+      scouts = listCache(id);
+      if (scouts.length) drawList(); else listEl.replaceChildren(el('li', { class: 'empty', style: 'padding:.75rem .5rem' }, t('loading')));
+      const [fresh, freshP] = await Promise.all([loadList(id).catch(() => null), loadPatrols(id).catch(() => null)]);
+      if (troop !== id) return; // the visitor already picked another troop
+      if (freshP) patrols = freshP;
+      if (fresh && JSON.stringify(fresh) !== JSON.stringify(scouts)) scouts = fresh;
+      drawList();
+    }
+    picker.addEventListener('change', () => switchTroop(Number(picker.value)));
+    document.addEventListener('langchange', () => { if (troops.length) drawPicker(); drawList(); drawDetail(); });
 
-    // ---------- login / boot ----------
-    startAuth({
-      async enter() {
-        try { [acts, labels, scouts, troops] = await Promise.all([api('/api/activities'), api('/api/labels'), api('/api/leader/scouts'), api('/api/troops')]); fillTroopSelects(); drawList(); } catch (e) { fail(e); }
-        drawDetail();
-      },
-      leave() { data = det = null; current = null; },
-      redraw() { fillTroopSelects(); drawList(); drawDetail(); },
-    });
+    (async () => {
+      // show the last list we saw immediately, then swap in the fresh one (no empty screen on repeat visits)
+      const saved = parseInt(localStorage.getItem('troop'), 10) || null; // the troop this visitor looked at last time
+      const troopsReq = api('/api/troops').catch(() => []);
+      const freshReq = saved ? loadList(saved).catch(() => null) : null; // start loading it now, in parallel
+      const freshPReq = saved ? loadPatrols(saved).catch(() => null) : null;
+      await initLang();
+      me = await getMe(); staff = !!me; // signed in? (also decides whether a scout's private details are fetched)
+      if (saved && listCache(saved).length) { troop = saved; scouts = listCache(saved); patrols = patrolCache(saved); useTroopWord(saved); drawList(); }
+      troops = await troopsReq;
+      const want = troops.some((x) => x.id === saved) ? saved : troops[0]?.id;
+      if (want) { troop = want; useTroopWord(want); drawPicker(); }
+      const fresh = want === saved && freshReq ? await freshReq : want ? await loadList(want).catch(() => null) : [];
+      const freshP = want === saved && freshPReq ? await freshPReq : want ? await loadPatrols(want).catch(() => null) : [];
+      scouts = fresh || (want === saved ? scouts : []);
+      patrols = freshP || (want === saved ? patrols : []);
+      drawList();
+      const id = parseInt(location.hash.slice(1), 10);
+      if (id) openScout(id); else drawDetail();
+    })();
   </script>
 </body>
 </html>

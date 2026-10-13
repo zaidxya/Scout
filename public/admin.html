@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="ar" dir="rtl" data-title="tab_admin">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>كشاف الفوج الثاني</title>
+  <link rel="icon" type="image/png" sizes="192x192" href="/favicon-v2.png">
+  <link rel="apple-touch-icon" href="/favicon-v2.png">
+  <meta name="theme-color" content="#671e93">
+  <script>document.documentElement.classList.add('js')</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <div class="grow"><h1><a class="brand" href="/"><img src="/logo-mark.png" alt=""><span data-i18n="title"></span></a></h1><p data-i18n="tab_admin"></p></div>
+    <nav>
+      <details class="menu" data-page="admin"></details>
+      <button id="langBtn" type="button" class="lang" data-i18n="lang_toggle">العربية</button>
+    </nav>
+  </header>
+  <main>
+    <p id="toast" class="error" role="status"></p>
+    <div id="needSignin" class="panel hidden">
+      <p data-i18n="admin_signin"></p>
+      <a class="btn" href="/leader.html?next=%2Fadmin.html" data-i18n="sign_in"></a>
+    </div>
+    <div id="denied" class="panel hidden"><p data-i18n="err_forbidden"></p></div>
+
+    <!-- Administration: the super admin's own site (not tied to any troop): troops, every account, and the activity log -->
+    <div id="app" class="hidden">
+      <div class="tabs" role="tablist">
+        <button id="btn-troops" type="button" role="tab" data-i18n="tab_troops"></button>
+        <button id="btn-accounts" type="button" role="tab" data-i18n="tab_accounts"></button>
+        <button id="btn-log" type="button" role="tab" data-i18n="tab_log"></button>
+      </div>
+
+      <div id="tab-troops" class="hidden">
+        <div class="panel">
+          <h2 data-i18n="troops_title"></h2>
+          <p class="hint" data-i18n="troops_hint"></p>
+          <ul id="troopList" class="simple-list"></ul>
+          <form id="troopForm">
+            <h3 data-i18n="add_troop"></h3>
+            <div class="grid2">
+              <label><span data-i18n="name_en"></span><input name="name_en" type="text" maxlength="60"></label>
+              <label><span data-i18n="name_ar"></span><input name="name_ar" type="text" maxlength="60" dir="rtl"></label>
+            </div>
+            <div class="grid2">
+              <label><span data-i18n="brand_en"></span><input name="brand_en" type="text" maxlength="40"></label>
+              <label><span data-i18n="brand_ar"></span><input name="brand_ar" type="text" maxlength="40" dir="rtl"></label>
+            </div>
+            <div class="grid2">
+              <label><span data-i18n="slogan_en"></span><input name="slogan_en" type="text" maxlength="60"></label>
+              <label><span data-i18n="slogan_ar"></span><input name="slogan_ar" type="text" maxlength="60" dir="rtl"></label>
+            </div>
+            <p class="hint" data-i18n="slogan_hint"></p>
+            <label class="check"><input name="xp_enabled" type="checkbox" checked> <span data-i18n="troop_xp"></span></label>
+            <p class="hint" data-i18n="troop_xp_hint"></p>
+            <label><span data-i18n="troop_level"></span><input name="level" type="number" min="1" max="1000" step="1" style="max-width:8rem"></label>
+            <p class="hint" data-i18n="troop_level_hint"></p>
+            <label><span data-i18n="troop_theme"></span><select name="theme" id="newTroopTheme"></select></label>
+            <label><span data-i18n="copy_from"></span><select name="copy_from" id="copyFrom"></select></label>
+            <p class="hint" data-i18n="copy_from_hint"></p>
+            <button class="btn" type="submit" data-i18n="add"></button>
+          </form>
+        </div>
+      </div>
+
+      <div id="tab-accounts" class="hidden">
+        <div class="panel">
+          <h2 data-i18n="tab_accounts"></h2>
+          <div id="accountGroups"></div>
+          <form id="leaderForm">
+            <h3 data-i18n="add_leader"></h3>
+            <div class="grid2">
+              <label><span data-i18n="username"></span><input name="username" type="text" autocomplete="off" pattern="[A-Za-z0-9_.\-]{3,40}" required></label>
+              <label><span data-i18n="password"></span><input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
+            </div>
+            <p class="hint" data-i18n="pw_hint"></p>
+            <p class="hint" data-unit="account_patrol_hint"></p>
+            <div class="grid2">
+              <label><span data-i18n="account_type"></span><select name="role"><option value="admin" data-i18n="acct_admin"></option><option value="leader" data-i18n="acct_leader"></option><option value="mod" data-i18n="acct_mod"></option></select></label>
+              <label><span data-i18n="report_troop"></span><select name="troop_id" id="acctTroop" required></select></label>
+            </div>
+            <label><span data-i18n="display_name"></span><input name="display_name" type="text" maxlength="60"></label>
+            <p class="hint" data-i18n="display_name_hint"></p>
+            <button class="btn" type="submit" data-i18n="add"></button>
+          </form>
+        </div>
+      </div>
+
+      <div id="tab-log" class="hidden">
+        <div class="panel">
+          <h2 data-i18n="tab_log"></h2>
+          <div class="filter-row">
+            <input id="logQ" type="search" data-i18n-ph="log_search" aria-label="Search">
+            <select id="logTroop" aria-label="Troop"></select>
+            <select id="logCat" aria-label="Type"></select>
+          </div>
+          <div id="logDays"></div>
+          <button id="logMore" class="btn ghost small hidden" type="button" data-i18n="log_more"></button>
+        </div>
+      </div>
+    </div>
+  </main>
+  <script src="/common.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const TABS = ['troops', 'accounts', 'log'];
+    let me = null, troops = [], accounts = [], logRows = [], logFull = false; // logFull: the last request came back full, so there may be older entries
+    const LOG_PAGE = 200;
+    const msg = (text, ok) => { $('toast').textContent = text || ''; $('toast').className = 'error' + (ok ? ' ok' : ''); };
+    const fail = (e) => msg(errText(e));
+    const troopName = (tr) => (tr ? (state.lang === 'ar' ? tr.name_ar : tr.name_en) : '');
+    const troopById = (id) => troops.find((x) => x.id === id);
+    const acctName = (r) => t('acct_' + r);
+
+    function showTab(n) {
+      if (!TABS.includes(n)) n = 'troops';
+      msg('');
+      TABS.forEach((x) => { $('tab-' + x).classList.toggle('hidden', x !== n); $('btn-' + x).setAttribute('aria-selected', String(x === n)); });
+      history.replaceState(null, '', '#' + n);
+      if (n === 'troops') loadTroops();
+      if (n === 'accounts') loadAccounts();
+      if (n === 'log') loadLog(true);
+    }
+    TABS.forEach((x) => $('btn-' + x).addEventListener('click', () => showTab(x)));
+
+    // ---------- troops ----------
+    const themeSelect = (cur) => el('select', { name: 'theme', 'aria-label': t('troop_theme') }, Object.keys(THEMES).map((k) => el('option', { value: k, ...(k === (cur || 'default') ? { selected: '' } : {}) }, t('theme_' + k))));
+    async function loadTroops() { try { troops = await api('/api/troops'); drawTroops(); } catch (e) { fail(e); } }
+    function drawTroops() {
+      $('newTroopTheme').replaceChildren(...Object.keys(THEMES).map((k) => el('option', { value: k }, t('theme_' + k))));
+      $('copyFrom').replaceChildren(el('option', { value: '' }, t('copy_none')), ...troops.map((x) => el('option', { value: String(x.id) }, troopName(x))));
+      $('acctTroop').replaceChildren(...troops.map((x) => el('option', { value: String(x.id) }, troopName(x))));
+      fillLogTroops();
+      $('troopList').replaceChildren(...troops.map((tr) => {
+        const editRow = el('form', { class: 'row troop-edit hidden' },
+          el('input', { name: 'name_en', type: 'text', maxlength: '60', value: tr.name_en, dir: 'ltr', 'aria-label': t('name_en') }),
+          el('input', { name: 'name_ar', type: 'text', maxlength: '60', value: tr.name_ar, dir: 'rtl', 'aria-label': t('name_ar') }),
+          el('input', { name: 'brand_en', type: 'text', maxlength: '40', value: tr.brand_en || '', dir: 'ltr', placeholder: t('brand_en'), 'aria-label': t('brand_en') }),
+          el('input', { name: 'brand_ar', type: 'text', maxlength: '40', value: tr.brand_ar || '', dir: 'rtl', placeholder: t('brand_ar'), 'aria-label': t('brand_ar') }),
+          el('input', { name: 'slogan_en', type: 'text', maxlength: '60', value: tr.slogan_en || '', dir: 'ltr', placeholder: t('slogan_en'), 'aria-label': t('slogan_en') }),
+          el('input', { name: 'slogan_ar', type: 'text', maxlength: '60', value: tr.slogan_ar || '', dir: 'rtl', placeholder: t('slogan_ar'), 'aria-label': t('slogan_ar') }),
+          el('input', { name: 'level', type: 'number', min: '1', max: '1000', step: '1', value: String(tr.level), required: '', style: 'max-width:6rem', title: t('troop_level'), 'aria-label': t('troop_level') }),
+          el('label', { class: 'check' }, el('input', { name: 'xp_enabled', type: 'checkbox', ...(tr.xp_enabled !== false ? { checked: '' } : {}) }), ' ', t('troop_xp')),
+          themeSelect(tr.theme),
+          el('button', { class: 'btn small', type: 'submit' }, t('save')));
+        editRow.addEventListener('submit', async (ev) => {
+          ev.preventDefault();
+          const f = new FormData(editRow);
+          try { await api('/api/troops/' + tr.id, 'PUT', { name_en: f.get('name_en'), name_ar: f.get('name_ar'), brand_en: f.get('brand_en'), brand_ar: f.get('brand_ar'), slogan_en: f.get('slogan_en'), slogan_ar: f.get('slogan_ar'), theme: f.get('theme'), level: f.get('level'), xp_enabled: f.get('xp_enabled') === 'on' }); msg(t('saved'), true); await loadTroops(); }
+          catch (e) { fail(e); }
+        });
+        return el('li', { class: 'acct' },
+          el('span', { class: 'grow' }, troopName(tr), (state.lang === 'ar' ? tr.slogan_ar || tr.slogan_en : tr.slogan_en || tr.slogan_ar) ? ` «${state.lang === 'ar' ? tr.slogan_ar || tr.slogan_en : tr.slogan_en || tr.slogan_ar}»` : '', ` · ${t('troop_level')} ${fmt(tr.level)}`, tr.xp_enabled === false ? ` · ${t('troop_xp_off')}` : ''),
+          el('button', { class: 'btn ghost small', type: 'button', onclick: () => { editRow.classList.toggle('hidden'); editRow.querySelector('input').focus(); } }, t('edit')),
+          el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
+            if (!(await confirmBox(t('confirm_delete_troop')))) return;
+            try { await api('/api/troops/' + tr.id, 'DELETE'); await loadTroops(); } catch (e) { fail(e); }
+          } }, t('delete')),
+          editRow);
+      }));
+    }
+    $('troopForm').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const f = new FormData(ev.target);
+      try {
+        await api('/api/troops', 'POST', { name_en: f.get('name_en'), name_ar: f.get('name_ar'), brand_en: f.get('brand_en'), brand_ar: f.get('brand_ar'), slogan_en: f.get('slogan_en'), slogan_ar: f.get('slogan_ar'), theme: f.get('theme'), level: f.get('level'), xp_enabled: f.get('xp_enabled') === 'on', copy_from: Number(f.get('copy_from')) || undefined });
+        ev.target.reset(); msg(t('saved'), true); await loadTroops();
+      } catch (e) { fail(e); }
+    });
+
+    // ---------- accounts: everyone, grouped by troop ----------
+    async function loadAccounts() { try { accounts = await api('/api/leaders'); if (!troops.length) troops = await api('/api/troops'); drawAccounts(); } catch (e) { fail(e); } }
+    function accountRow(l) {
+      const pwRow = el('form', { class: 'row troop-edit hidden' },
+        el('input', { type: 'password', name: 'password', minlength: '8', required: '', autocomplete: 'new-password', placeholder: t('reset_pw_for'), 'aria-label': t('reset_pw_for') }),
+        el('button', { class: 'btn small', type: 'submit' }, t('save')));
+      pwRow.addEventListener('submit', async (ev) => {
+        ev.preventDefault();
+        try { await api(`/api/leaders/${l.id}/password`, 'PUT', { password: new FormData(pwRow).get('password') }); pwRow.reset(); pwRow.classList.add('hidden'); msg(t('saved'), true); }
+        catch (e) { fail(e); }
+      });
+      return el('li', { class: 'acct' },
+        el('span', { class: 'grow' }, l.username, l.username === me.username ? ` ${t('you')}` : '', ' ',
+          el('span', { class: 'chip leader' }, acctName(l.role)),
+          l.scout_name && l.scout_name !== l.username ? el('small', { style: 'display:block;opacity:.7' }, `${t('scout_profile')} ${l.scout_name}`) : ''),
+        l.can_manage ? el('button', { class: 'btn ghost small', type: 'button', onclick: () => { pwRow.classList.toggle('hidden'); pwRow.querySelector('input').focus(); } }, t('reset_password')) : '',
+        l.can_manage ? el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
+          if (!(await confirmBox(t(l.role === 'admin' ? 'confirm_delete_admin' : 'confirm_delete_leader')))) return;
+          try { await api('/api/leaders/' + l.id, 'DELETE'); await loadAccounts(); } catch (e) { fail(e); }
+        } }, t('delete')) : '',
+        pwRow);
+    }
+    function drawAccounts() {
+      const supers = accounts.filter((l) => l.role === 'super_admin');
+      const groups = [...(supers.length ? [[t('all_troops_acct'), supers]] : []),
+        ...troops.map((tr) => [troopName(tr), accounts.filter((l) => l.troop_id === tr.id)]).filter(([, g]) => g.length)];
+      $('accountGroups').replaceChildren(...groups.flatMap(([name, g]) => [el('h3', {}, name), el('ul', { class: 'simple-list' }, g.map(accountRow))]));
+    }
+    $('leaderForm').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const f = new FormData(ev.target);
+      try {
+        await api('/api/leaders', 'POST', { username: f.get('username'), password: f.get('password'), display_name: f.get('display_name'), role: f.get('role'), troop_id: Number(f.get('troop_id')) });
+        const troop = f.get('troop_id'); ev.target.reset(); $('acctTroop').value = troop; msg(t('saved'), true); await loadAccounts();
+      } catch (e) { fail(e); }
+    });
+
+    // ---------- activity log: by day, newest first; filter by troop (asked from the server), type and text (on what is loaded) ----------
+    const CATS = { scouts: '#2b7a9b', xp: '#c98a12', depot: '#2f8f5b', content: '#8a4fb5', admin: '#b3261e' }; // type -> dot colour
+    const catOf = (a) => (/^(scout_|photo_|label)/.test(a) || /^patrol_/.test(a) ? 'scouts'
+      : /^(xp_|attendance|absence|meeting_|activity_)/.test(a) ? 'xp'
+      : /^depot_/.test(a) ? 'depot'
+      : /^(post_|report_)/.test(a) ? 'content' : 'admin'); // accounts, troops, passwords
+    function fillLogTroops() {
+      const sel = $('logTroop'), keep = sel.value;
+      sel.replaceChildren(el('option', { value: '' }, t('log_all_troops')), ...troops.map((x) => el('option', { value: String(x.id) }, troopName(x))));
+      sel.value = keep;
+      const cat = $('logCat'), keepC = cat.value;
+      cat.replaceChildren(el('option', { value: '' }, t('log_cat_all')), ...Object.keys(CATS).map((k) => el('option', { value: k }, t('log_cat_' + k))));
+      cat.value = keepC;
+    }
+    // the sentence for an entry; the patrol word follows the entry's troop (Rovers say رهط)
+    function describe(r) {
+      const m = r.meta || {}, ar = state.lang === 'ar';
+      setUnitTheme(troopById(r.troop_id)?.theme);
+      const act = ar ? m.activity_ar : m.activity_en;
+      const verb = tu('audit_' + r.action);
+      switch (r.action) {
+        case 'xp_award': return `${verb} ${signed(m.xp)} ${t('xp')} (${act}) ${t('audit_to')} ${m.name}`;
+        case 'xp_undo': return `${verb} ${signed(m.xp)} ${t('xp')} (${act}) ${t('audit_from')} ${m.name}`;
+        case 'activity_add': return `${verb} ${ar ? m.name_ar : m.name_en} (${signed(m.xp)} ${t('xp')})`;
+        case 'activity_delete': return `${verb} ${ar ? m.name_ar : m.name_en}`;
+        case 'scout_patrol': return `${verb} ${m.name}${m.patrol ? ` (${m.patrol})` : ''}`;
+        case 'scout_promote': return `${verb} ${m.name} ${t('audit_to')} ${m.to}`;
+        case 'depot_reserve': case 'depot_unreserve': return `${verb} ${m.name} × ${fmt(m.quantity)}`; // build 34 entries: one item each
+        case 'attendance': return `${m.name} ${verb} ${m.title} (${signed(m.xp)} ${t('xp')})`;
+        case 'attendance_undo': return `${verb} ${m.name} — ${m.title} (${signed(-m.xp)} ${t('xp')})`;
+        case 'attendance_bulk': return `${verb} ${m.title}: ${fmt(m.count)} (${signed(m.xp)} ${t('xp')})`;
+        case 'absence': return `${m.name} ${verb} ${m.title} (${signed(m.xp)} ${t('xp')})`;
+        case 'absence_excused': return `${m.name} ${verb} ${m.title}`;
+        case 'absence_undo': return `${verb} ${m.name} — ${m.title} (${signed(-m.xp)} ${t('xp')})`;
+        case 'absence_bulk': case 'absence_bulk_undo': return `${verb} ${m.title}: ${fmt(m.count)} (${signed(m.xp)} ${t('xp')})`;
+        case 'attendance_bulk_undo': return `${verb} ${m.title}: ${fmt(m.count)} (${signed(-m.xp)} ${t('xp')})`;
+        case 'depot_book': case 'depot_unbook': case 'depot_take': case 'depot_return': return `${verb} ${(m.items || []).map((x) => `${ar ? x.name_ar : x.name_en} × ${fmt(x.quantity)}`).join(ar ? '، ' : ', ')}`;
+        case 'report_save': case 'report_delete': return `${verb} (${m.name ? fmtDay(m.name) : ''})`;
+        case 'password_change': return verb;
+        default: return `${verb} ${m.name || ''}`;
+      }
+    }
+    async function loadLog(fresh) {
+      try {
+        const q = new URLSearchParams({ limit: String(LOG_PAGE) });
+        if ($('logTroop').value) q.set('troop', $('logTroop').value);
+        if (!fresh && logRows.length) q.set('before', String(logRows[logRows.length - 1].id));
+        const rows = await api('/api/audit?' + q);
+        logRows = fresh ? rows : logRows.concat(rows);
+        logFull = rows.length === LOG_PAGE;
+        drawLog();
+      } catch (e) { fail(e); }
+    }
+    const dayOf = (iso) => new Date(iso).toLocaleDateString('en-CA'); // the local day
+    function dayLabel(day) {
+      const d = new Date(); d.setHours(12); const today = d.toLocaleDateString('en-CA'); d.setDate(d.getDate() - 1);
+      return day === today ? t('log_today') : day === d.toLocaleDateString('en-CA') ? t('log_yesterday') : fmtDay(day);
+    }
+    function drawLog() {
+      const q = norm($('logQ').value.trim()), cat = $('logCat').value;
+      const rows = logRows.map((r) => ({ r, text: describe(r), cat: catOf(r.action) })).filter((x) => (!cat || x.cat === cat) && (!q || norm(x.r.leader_name + ' ' + x.text).includes(q)));
+      const days = [];
+      rows.forEach((x) => { const d = dayOf(x.r.created_at); (days.length && days[days.length - 1][0] === d ? days[days.length - 1][1] : (days.push([d, []]), days[days.length - 1][1])).push(x); });
+      $('logDays').replaceChildren(...(days.length ? days.flatMap(([d, g]) => [
+        el('h3', { class: 'log-day' }, dayLabel(d)),
+        el('ul', { class: 'log-list' }, g.map(({ r, text, cat: c }) => el('li', { class: 'log-row' },
+          el('span', { class: 'log-time' }, new Date(r.created_at).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })),
+          el('span', { class: 'log-dot', style: `--dot:${CATS[c]}`, title: t('log_cat_' + c) }),
+          el('span', { class: 'log-text', dir: 'auto' }, el('b', {}, r.leader_name), ' ', text),
+          r.troop_id ? el('span', { class: 'chip tag' }, troopName(troopById(r.troop_id))) : '')))]) : [el('p', { class: 'empty' }, t('log_empty'))]));
+      $('logMore').classList.toggle('hidden', !logFull);
+    }
+    $('logQ').addEventListener('input', frame(drawLog)); $('logCat').addEventListener('change', drawLog);
+    $('logTroop').addEventListener('change', () => loadLog(true));
+    $('logMore').addEventListener('click', () => loadLog(false));
+
+    document.addEventListener('langchange', () => { if (!me) return; setUnitTheme('default'); paintUnits(); drawTroops(); drawAccounts(); drawLog(); });
+
+    (async () => {
+      await initLang();
+      me = await getMe();
+      if (!me) { $('needSignin').classList.remove('hidden'); return; }
+      if (me.role !== 'super_admin') { $('denied').classList.remove('hidden'); return; } // the server refuses everything here for anyone else
+      $('app').classList.remove('hidden');
+      troops = await api('/api/troops').catch(() => []);
+      fillLogTroops(); paintUnits();
+      showTab(location.hash.slice(1) || 'troops');
+    })();
+  </script>
+</body>
+</html>

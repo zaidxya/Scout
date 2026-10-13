@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="ar" dir="rtl" data-title="reports_page">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>كشاف الفوج الثاني</title>
+  <link rel="icon" type="image/png" sizes="192x192" href="/favicon-v2.png">
+  <link rel="apple-touch-icon" href="/favicon-v2.png">
+  <meta name="theme-color" content="#671e93">
+  <script>document.documentElement.classList.add('js')</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <div class="grow"><h1><a class="brand" href="/"><img src="/logo-mark.png" alt=""><span data-i18n="title"></span></a></h1><p data-i18n="reports_page"></p></div>
+    <nav>
+      <details class="menu" data-page="reports"></details>
+      <button id="langBtn" type="button" class="lang" data-i18n="lang_toggle">العربية</button>
+    </nav>
+  </header>
+  <main>
+    <p id="toast" class="error" role="status"></p>
+    <!-- weekly reports are for signed-in accounts -->
+    <div id="needSignin" class="panel hidden">
+      <p data-i18n="reports_signin"></p>
+      <a class="btn" href="/leader.html?next=%2Freports.html" data-i18n="sign_in"></a>
+    </div>
+    <div id="app" class="hidden">
+      <form id="reportForm" class="panel">
+        <h2 id="reportFormTitle" data-i18n="report_new"></h2>
+        <p class="hint" data-i18n="reports_hint"></p>
+        <div class="grid2">
+          <label><span data-i18n="report_week"></span><select name="week"></select></label>
+          <label><span data-i18n="report_troop"></span><select name="troop"></select></label>
+        </div>
+        <label><span data-i18n="report_body"></span><textarea name="body" maxlength="4000" required style="min-height:9rem"></textarea></label>
+        <div class="row">
+          <button class="btn" type="submit" data-i18n="save"></button>
+          <button id="reportDelete" class="btn quiet hidden" type="button" data-i18n="delete"></button>
+        </div>
+      </form>
+      <h2 data-i18n="reports_title"></h2>
+      <div id="weeks"></div>
+      <button id="moreWeeks" class="btn ghost small hidden" type="button" data-i18n="report_more"></button>
+    </div>
+  </main>
+  <script src="/common.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let me = null, troops = [], reports = [], shown = 6, loaded = false; // shown: how many weeks are listed
+    const form = $('reportForm');
+    const roams = () => !!me && (me.role === 'super_admin' || me.role === 'leader'); // choose any troop; admins and mods only write their own troop's
+    const canEdit = (troopId) => roams() || troopId === me.troop_id;
+    const troopLabel = (x) => (state.lang === 'ar' ? x.name_ar : x.name_en);
+    const msg = (text, ok) => { $('toast').textContent = text || ''; $('toast').className = 'error' + (ok ? ' ok' : ''); };
+    const ymd = (d) => d.toLocaleDateString('en-CA'); // the local day, YYYY-MM-DD
+    // the weekly meeting is on Saturday: this week's (or the last one that has passed), then back in time
+    const recentSaturdays = (n) => { const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 1) % 7)); return Array.from({ length: n }, (_, i) => { const x = new Date(d); x.setDate(d.getDate() - 7 * i); return ymd(x); }); };
+    const weekLabel = (w) => t('report_week_label').replace('{date}', fmtDay(w));
+    const find = (troopId, week) => reports.find((r) => r.troop_id === troopId && r.week_date === week);
+
+    // ---- the form: one report per troop and week, so choosing a week and troop that has one loads it for editing ----
+    function fillChoices(keepWeek, keepTroop) {
+      const f = form.elements, weeks = recentSaturdays(52);
+      if (keepWeek && !weeks.includes(keepWeek)) weeks.push(keepWeek); // an older report being edited
+      f.week.replaceChildren(...weeks.map((w) => el('option', { value: w }, weekLabel(w))));
+      f.week.value = keepWeek || weeks[0];
+      const mine = roams() ? troops : troops.filter((x) => x.id === me.troop_id); // admins and mods have no choice: their own troop
+      f.troop.replaceChildren(...mine.map((x) => el('option', { value: String(x.id) }, troopLabel(x))));
+      let saved = null; try { saved = parseInt(localStorage.getItem('leaderTroop'), 10) || null; } catch { /* ignore */ }
+      f.troop.value = String(keepTroop ?? (roams() ? (mine.some((x) => x.id === saved) ? saved : me.troop_id ?? mine[0]?.id) : me.troop_id));
+      f.troop.disabled = !roams();
+    }
+    let wasLoaded = false;
+    function syncForm() {
+      const f = form.elements, r = find(Number(f.troop.value), f.week.value);
+      if (r) { f.body.value = r.body; } else if (wasLoaded) { f.body.value = ''; }
+      wasLoaded = !!r;
+      $('reportFormTitle').dataset.i18n = r ? 'report_edit' : 'report_new'; $('reportFormTitle').textContent = t(r ? 'report_edit' : 'report_new');
+      $('reportDelete').classList.toggle('hidden', !r || !canEdit(r.troop_id));
+    }
+    form.elements.week.addEventListener('change', syncForm); form.elements.troop.addEventListener('change', syncForm);
+    form.addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const f = form.elements;
+      try {
+        await api('/api/reports', 'PUT', { troop_id: Number(f.troop.value), week: f.week.value, body: f.body.value });
+        msg(t('saved'), true); await load(f.week.value, Number(f.troop.value));
+      } catch (e) { msg(errText(e)); }
+    });
+    $('reportDelete').addEventListener('click', async () => {
+      const f = form.elements, r = find(Number(f.troop.value), f.week.value); if (!r) return;
+      if (!(await confirmBox(t('confirm_delete_report')))) return;
+      try { await api('/api/reports/' + r.id, 'DELETE'); f.body.value = ''; wasLoaded = false; msg(''); await load(f.week.value, Number(f.troop.value)); } catch (e) { msg(errText(e)); }
+    });
+
+    // ---- the list: each week (this week and the last few, plus any older one with a report), every troop's report under it ----
+    function card(troop, week) {
+      const r = find(troop.id, week);
+      const edit = () => { form.elements.week.value = week; form.elements.troop.value = String(troop.id); syncForm(); form.scrollIntoView({ behavior: 'smooth', block: 'start' }); form.elements.body.focus({ preventScroll: true }); };
+      return el('div', { class: 'post report' + (r ? '' : ' report-none') },
+        el('div', { class: 'post-meta' },
+          el('span', { class: 'chip tag' }, troopLabel(troop)),
+          r ? el('small', {}, t('report_by').replace('{name}', r.author || '')) : ''),
+        r ? el('p', { class: 'post-body', dir: 'auto' }, r.body) : el('p', { class: 'hint', style: 'margin:0' }, t('report_none')), // plain text: line breaks kept
+        canEdit(troop.id) ? el('div', { class: 'row post-actions' }, el('button', { class: 'btn ghost small', type: 'button', onclick: edit }, t(r ? 'edit' : 'report_add'))) : '');
+    }
+    function drawWeeks() {
+      const weeks = [...new Set([...recentSaturdays(4), ...reports.map((r) => r.week_date)])].sort().reverse();
+      $('weeks').replaceChildren(...(weeks.length ? weeks.slice(0, shown).map((w) => el('section', { class: 'panel' },
+        el('h3', {}, weekLabel(w)), el('div', { class: 'posts' }, troops.map((tr) => card(tr, w))))) : [el('p', { class: 'empty' }, t(loaded ? 'report_none' : 'loading'))]));
+      $('moreWeeks').classList.toggle('hidden', weeks.length <= shown);
+    }
+    $('moreWeeks').addEventListener('click', () => { shown += 6; drawWeeks(); });
+
+    async function load(week, troop) {
+      reports = (await api('/api/reports').catch(() => null)) || reports;
+      loaded = true; fillChoices(week, troop); syncForm(); drawWeeks();
+    }
+    document.addEventListener('langchange', () => { if (!me) return; fillChoices(form.elements.week.value, Number(form.elements.troop.value)); syncForm(); drawWeeks(); });
+
+    (async () => {
+      const troopsReq = api('/api/troops').catch(() => []);
+      await initLang();
+      me = await getMe();
+      if (!me) { $('needSignin').classList.remove('hidden'); return; }
+      troops = await troopsReq;
+      $('app').classList.remove('hidden');
+      await load();
+    })();
+  </script>
+</body>
+</html>

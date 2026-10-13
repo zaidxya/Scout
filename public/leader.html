@@ -15,7 +15,7 @@
 </head>
 <body>
   <header>
-    <div class="grow"><h1><a class="brand" href="/"><img src="/logo-mark.png" alt=""><span data-i18n="title"></span></a></h1><p data-i18n="leader_area"></p><p id="meName" dir="auto" style="font-weight:700;opacity:1;padding-inline-end:1rem;border-inline-end:1px solid rgba(var(--on-primary-rgb),.4)"></p></div>
+    <div class="grow"><h1><a class="brand" href="/"><img src="/logo-mark.png" alt=""><span data-i18n="title"></span><small id="brandSlogan" class="brand-slogan hidden"></small></a></h1><p data-i18n="leader_area"></p><p id="meName" dir="auto" style="font-weight:700;opacity:1;padding-inline-end:1rem;border-inline-end:1px solid rgba(var(--on-primary-rgb),.4)"></p></div>
     <nav>
       <details class="menu" data-page="leader"></details>
       <button id="langBtn" type="button" class="lang" data-i18n="lang_toggle">العربية</button>
@@ -31,6 +31,7 @@
     </form>
 
     <div id="app" class="hidden">
+      <div id="viewBar" class="troop-bar hidden"><label for="viewSwitch" data-i18n="view_as_label"></label><select id="viewSwitch"></select></div>
       <div id="troopBar" class="troop-bar hidden"><label for="troopSwitch" data-i18n="working_in"></label><select id="troopSwitch"></select></div>
       <div class="tabs" role="tablist">
         <button id="btn-scouts" type="button" role="tab" data-i18n="tab_scouts"></button>
@@ -39,15 +40,7 @@
         <button id="btn-patrols" type="button" role="tab" data-unit="tab_patrols"></button>
         <button id="btn-attendance" type="button" role="tab" data-i18n="tab_attendance"></button>
         <button id="btn-labels" type="button" role="tab" data-i18n="tab_labels"></button>
-        <button id="btn-troops" type="button" role="tab" data-i18n="tab_troops"></button>
-        <!-- super admin only: Leaders and the activity log live in this collapsed menu -->
-        <details id="adminMenu" class="tab-menu hidden">
-          <summary id="adminSummary" data-i18n="tab_admin"></summary>
-          <div id="adminList" class="tab-menu-list" role="menu">
-            <button id="btn-leaders" type="button" role="tab" data-i18n="tab_leaders"></button>
-            <button id="btn-log" type="button" role="tab" data-i18n="tab_log"></button>
-          </div>
-        </details>
+        <!-- Troops, Leaders and the Activity log (super admin) are in the header menu, under Administration -->
       </div>
       <p id="toast" class="error" role="status"></p>
 
@@ -124,13 +117,16 @@
           <div class="panel">
             <h2 data-i18n="tab_attendance"></h2>
             <p id="attHint" class="hint" data-i18n="att_hint"></p>
+            <p id="attNoPatrol" class="hint hidden" data-i18n="mod_no_patrol"></p>
             <form id="meetingForm">
-              <h3 data-i18n="att_new_meeting"></h3>
+              <h3 id="meetingFormTitle" data-i18n="att_new_meeting"></h3>
+              <h3 id="meetingFormTitleMod" class="hidden" data-unit="att_new_patrol_meeting"></h3>
               <div class="grid2">
                 <label><span data-i18n="att_date"></span><input name="date" type="date" required></label>
                 <label><span data-i18n="att_title"></span><input name="title" type="text" maxlength="80" required></label>
               </div>
-              <label><span data-i18n="att_type"></span><select name="kind" style="max-width:12rem"><option value="meeting" data-i18n="att_kind_meeting"></option><option value="event" data-i18n="att_kind_event"></option></select></label>
+              <label id="kindLabel"><span data-i18n="att_type"></span><select name="kind" style="max-width:12rem"><option value="meeting" data-i18n="att_kind_meeting"></option><option value="event" data-i18n="att_kind_event"></option><option id="kindPatrolOpt" value="patrol" data-unit="att_kind_patrol"></option></select></label>
+              <label id="meetingPatrolLabel" class="hidden"><span data-unit="patrol_select"></span><select name="patrol_id" style="max-width:12rem"></select></label>
               <div id="meetingXp">
                 <div class="grid2">
                   <label><span data-i18n="att_xp"></span><input name="xp" type="number" min="0" max="1000" step="1" value="10" required></label>
@@ -145,7 +141,7 @@
             <h3 data-i18n="att_meetings"></h3>
             <div class="filter-row">
               <input id="meetingQ" type="search" data-i18n-ph="att_search" aria-label="Search">
-              <select id="meetingKind" aria-label="Type"><option value="" data-i18n="att_kind_all"></option><option value="meeting" data-i18n="att_kind_meeting"></option><option value="event" data-i18n="att_kind_event"></option></select>
+              <select id="meetingKind" aria-label="Type"><option value="" data-i18n="att_kind_all"></option><option value="meeting" data-i18n="att_kind_meeting"></option><option value="event" data-i18n="att_kind_event"></option><option value="patrol" data-unit="att_kind_patrol"></option></select>
             </div>
             <ul id="meetingList" class="simple-list"></ul>
           </div>
@@ -156,13 +152,6 @@
           </div>
         </div>
         <div id="attSheet" class="panel hidden"></div>
-      </div>
-
-      <div id="tab-log" class="hidden">
-        <div class="panel">
-          <h2 data-i18n="log_title"></h2>
-          <ul id="logList" class="simple-list"></ul>
-        </div>
       </div>
 
       <div id="tab-labels" class="hidden">
@@ -186,52 +175,6 @@
         </div>
       </div>
 
-      <div id="tab-troops" class="hidden">
-        <div class="panel">
-          <h2 data-i18n="troops_title"></h2>
-          <p class="hint" data-i18n="troops_hint"></p>
-          <ul id="troopList" class="simple-list"></ul>
-          <form id="troopForm">
-            <h3 data-i18n="add_troop"></h3>
-            <div class="grid2">
-              <label><span data-i18n="name_en"></span><input name="name_en" type="text" maxlength="60"></label>
-              <label><span data-i18n="name_ar"></span><input name="name_ar" type="text" maxlength="60" dir="rtl"></label>
-            </div>
-            <div class="grid2">
-              <label><span data-i18n="brand_en"></span><input name="brand_en" type="text" maxlength="40"></label>
-              <label><span data-i18n="brand_ar"></span><input name="brand_ar" type="text" maxlength="40" dir="rtl"></label>
-            </div>
-            <label class="check"><input name="xp_enabled" type="checkbox" checked> <span data-i18n="troop_xp"></span></label>
-            <p class="hint" data-i18n="troop_xp_hint"></p>
-            <label><span data-i18n="troop_level"></span><input name="level" type="number" min="1" max="1000" step="1" style="max-width:8rem"></label>
-            <p class="hint" data-i18n="troop_level_hint"></p>
-            <label><span data-i18n="troop_theme"></span><select name="theme" id="newTroopTheme"></select></label>
-            <label><span data-i18n="copy_from"></span><select name="copy_from" id="copyFrom"></select></label>
-            <p class="hint" data-i18n="copy_from_hint"></p>
-            <button class="btn" type="submit" data-i18n="add"></button>
-          </form>
-        </div>
-      </div>
-
-      <div id="tab-leaders" class="hidden">
-        <div id="leaderPanel" class="panel">
-          <h2 data-i18n="leaders_title"></h2>
-          <ul id="leaderList" class="simple-list"></ul>
-          <form id="leaderForm">
-            <h3 data-i18n="add_leader"></h3>
-            <div class="grid2">
-              <label><span data-i18n="username"></span><input name="username" type="text" autocomplete="off" pattern="[A-Za-z0-9_.\-]{3,40}" required></label>
-              <label><span data-i18n="password"></span><input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
-            </div>
-            <p class="hint" data-i18n="pw_hint"></p>
-            <p class="hint" data-unit="account_patrol_hint"></p>
-            <label><span data-i18n="account_type"></span><select name="role"><option value="admin" data-i18n="acct_admin"></option><option value="leader" data-i18n="acct_leader"></option><option value="mod" data-i18n="acct_mod"></option></select></label>
-            <label><span data-i18n="display_name"></span><input name="display_name" type="text" maxlength="60"></label>
-            <p class="hint" data-i18n="display_name_hint"></p>
-            <button class="btn" type="submit" data-i18n="add"></button>
-          </form>
-        </div>
-      </div>
     </div>
   </main>
   <script src="/common.js"></script>
@@ -242,11 +185,12 @@
     const isSuper = () => myRole === 'super_admin';
     const roams = () => myRole === 'super_admin' || myRole === 'leader';
     const xpOn = () => troopById(activeTroop())?.xp_enabled !== false; // does the troop being worked on use the XP system? // can switch between troops (leaders have a home troop, the super admin none)
-    const TABS = ['scouts', 'addscout', 'activities', 'patrols', 'attendance', 'labels', 'troops', 'leaders', 'log'];
-    const isMod = () => myRole === 'mod'; // a mod (مسؤول) has the members, their activity and the patrols (and its own password)
+    const TABS = ['scouts', 'addscout', 'activities', 'patrols', 'attendance', 'labels'];
+    const BTN_TABS = TABS; // (Administration has its own site, /admin.html)
+    const isMod = () => myRole === 'mod'; // a mod (رائد) has the members of its own patrol and their activity (and its own password)
     const canLabels = () => isSuper() || myRole === 'admin'; // roles and tags: not for mods or leaders
     // troops, accounts and the activity log are for the super admin only; roles & tags and activities also for admins (not leaders); a mod has just scouts, patrols and attendance
-    const tabAllowed = (n) => isMod() ? (n === 'scouts' || n === 'addscout' || n === 'patrols' || n === 'attendance') : (n === 'troops' || n === 'leaders' || n === 'log' ? isSuper() : n === 'labels' ? canLabels() : n === 'activities' ? myRole !== 'leader' && xpOn() : true);
+    const tabAllowed = (n) => isMod() ? (n === 'scouts' || n === 'addscout' || n === 'attendance') : (n === 'labels' ? canLabels() : n === 'activities' ? myRole !== 'leader' && xpOn() : true);
 
     const msg = (text, ok) => { $('toast').textContent = text || ''; $('toast').className = 'error' + (ok ? ' ok' : ''); };
     const fail = (e) => { if (e.status === 401 && e.code === 'unauthorized') show(false); msg(errText(e)); };
@@ -259,41 +203,25 @@
     }
     // hide the admin-only and super-admin-only pieces from everyone else
     function applyRole() {
-      TABS.forEach((x) => $('btn-' + x).classList.toggle('hidden', !tabAllowed(x)));
-      $('adminMenu').classList.toggle('hidden', !isSuper()); // Leaders and Activity log: super admin only
+      BTN_TABS.forEach((x) => $('btn-' + x).classList.toggle('hidden', !tabAllowed(x)));
     }
     function showTab(n) {
       if (!tabAllowed(n)) n = 'scouts';
-      msg(''); $('adminMenu').open = false;
-      $('adminSummary').classList.toggle('on', n === 'leaders' || n === 'log'); // the menu's title is lit while one of its pages is open
+      msg('');
       TABS.forEach((x) => {
         $('tab-' + x).classList.toggle('hidden', x !== n);
-        $('btn-' + x).setAttribute('aria-selected', String(x === n));
-        if (x === n) $('btn-' + x).scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        const b = $('btn-' + x); // (no button for the Administration pages: nothing is lit while one of them is open)
+        if (!b) return;
+        b.setAttribute('aria-selected', String(x === n));
+        if (x === n) b.scrollIntoView({ block: 'nearest', inline: 'nearest' });
       });
       if (n === 'addscout') $('addForm').elements.name.focus();
       if (n === 'activities') loadActs();
       if (n === 'patrols') loadPatrols();
       if (n === 'attendance') openAttendance();
       if (n === 'labels') loadLabels();
-      if (n === 'troops') loadTroops();
-      if (n === 'leaders' && isSuper()) loadLeaders();
-      if (n === 'log') loadLog();
     }
-    TABS.forEach((x) => $('btn-' + x).addEventListener('click', () => showTab(x)));
-    {
-      const menu = $('adminMenu'), list = $('adminList');
-      menu.addEventListener('toggle', () => {
-        if (!menu.open) return;
-        const r = $('adminSummary').getBoundingClientRect(), rtl = getComputedStyle(document.documentElement).direction === 'rtl';
-        list.style.top = r.bottom + 'px';
-        list.style.left = rtl ? 'auto' : r.left + 'px'; list.style.right = rtl ? Math.max(0, innerWidth - r.right) + 'px' : 'auto';
-      });
-      document.addEventListener('click', (ev) => { if (menu.open && !menu.contains(ev.target)) menu.open = false; });
-      menu.addEventListener('keydown', (ev) => { if (ev.key === 'Escape') { menu.open = false; $('adminSummary').focus(); } });
-      $('adminSummary').closest('.tabs').addEventListener('scroll', () => { menu.open = false; });
-    }
-
+    BTN_TABS.forEach((x) => $('btn-' + x).addEventListener('click', () => showTab(x)));
     // ---------- scouts ----------
     const labelName = (l) => (state.lang === 'ar' ? l.name_ar : l.name_en);
     const labelById = (id) => labels.find((l) => l.id === id);
@@ -320,7 +248,11 @@
       if (activeTroop() != null) sw.value = String(activeTroop());
       sw.setAttribute('aria-label', t('troop_picker'));
       $('troopBar').classList.toggle('hidden', !(roams() && troops.length > 1));
-      $('copyFrom').replaceChildren(el('option', { value: '' }, t('copy_none')), ...troops.map((x) => el('option', { value: String(x.id) }, troopName(x))));
+    }
+    // the troop's slogan ("Always Prepared"), in the header beside the troop's name, when it has one (set in Administration > Troops)
+    function paintTroopLine(tr) {
+      const s = (tr && (state.lang === 'ar' ? tr.slogan_ar || tr.slogan_en : tr.slogan_en || tr.slogan_ar)) || '', b = $('brandSlogan');
+      b.textContent = s; b.classList.toggle('hidden', !s);
     }
     // pick the troop the super admin or a leader works in: the saved one if it still exists, otherwise the first
     function chooseTroop(id) {
@@ -328,8 +260,9 @@
       state.troop = ok ? id : troops[0]?.id ?? null;
       if (roams()) { try { localStorage.setItem('leaderTroop', String(state.troop)); } catch { /* ignore */ } }
       const tr = troopById(state.troop);
+      paintTroopLine(tr);
       setXpEnabled(tr?.xp_enabled); // off: no XP anywhere for this troop
-      if (TABS.every((x) => $('btn-' + x))) { applyRole(); const open = TABS.find((x) => !$('tab-' + x).classList.contains('hidden')); if (open && !tabAllowed(open)) showTab('scouts'); }
+      if (BTN_TABS.every((x) => $('btn-' + x))) { applyRole(); const open = TABS.find((x) => !$('tab-' + x).classList.contains('hidden')); if (open && !tabAllowed(open)) showTab('scouts'); }
       setUnitTheme(tr?.theme); paintUnits(); // Rovers call their patrols رهط
       applyTheme(tr?.theme, { en: tr?.brand_en, ar: tr?.brand_ar }, tr && { en: tr.name_en, ar: tr.name_ar }); // the leader area wears the identity (and tab title) of the troop being worked on
     }
@@ -344,21 +277,23 @@
       if (mine !== troopLoad) return;
       [acts, labels, patrols, scouts] = r;
       drawList(); drawDetail(); drawActs(); drawLabels(); drawPatrols();
-      if (!$('tab-leaders').classList.contains('hidden')) loadLeaders();
       if (!$('tab-attendance').classList.contains('hidden')) openAttendance();
-      if (!$('tab-log').classList.contains('hidden')) loadLog();
     }
     $('troopSwitch').addEventListener('change', async () => {
       chooseTroop(Number($('troopSwitch').value)); msg('');
       try { await loadTroopData(); } catch (e) { fail(e); }
     });
 
+    const modNoPatrol = () => isMod() && !scouts.some((s) => s.editable); // a mod whose own profile has no patrol can change nobody (its own profile is in its patrol, so a mod with one always has someone)
+    const editable = (s) => !s || s.editable !== false; // a mod sees every scout but changes only its patrol's (the server says which)
     function drawList() {
       const q = norm($('q').value.trim());
       const live = scouts.filter((s) => s.active !== false), off = scouts.filter((s) => s.active === false);
       renderScoutList($('list'), live.filter((s) => matches(s, q)), current, (id) => openScout(id),
         (s) => el('span', { class: 'sub' }, chips(s.label_ids)),
         live.length ? 'no_results' : 'no_scouts', patrols);
+      // a mod whose own profile has no patrol yet controls nobody: say why
+      if (modNoPatrol()) $('list').prepend(el('li', { class: 'empty' }, t('mod_no_patrol')));
       // deactivated scouts (left the movement) are kept out of the list unless asked for
       $('inactiveCount').textContent = off.length ? `(${fmt(off.length)})` : '';
       const showOff = $('showInactive').checked && off.length > 0;
@@ -480,7 +415,7 @@
       patrolPick.addEventListener('change', async () => {
         try { await api(`/api/scouts/${data.id}/patrol`, 'PUT', { patrol_id: patrolPick.value ? Number(patrolPick.value) : null }); msg(''); await refresh(); } catch (e) { fail(e); }
       });
-      const patrolBlock = patrols.length ? el('div', { style: 'margin-bottom:.9rem' }, el('h3', {}, tu('patrol_select')),
+      const patrolBlock = patrols.length && !isMod() ? el('div', { style: 'margin-bottom:.9rem' }, el('h3', {}, tu('patrol_select')),
         patrolPick, acctScout ? el('small', { class: 'hint' }, tu('patrol_account_note')) : '') : '';
       const labelsPanel = el('div', { class: 'panel' }, patrolBlock, canLabels() ? [labelBlock('role', 'roles'), labelBlock('tag', 'tags')] : '');
 
@@ -557,12 +492,17 @@
       } }, t('delete_scout'));
       const offBanner = isOff ? el('p', { class: 'panel hint' }, t('inactive_note')) : '';
 
-      box.append(renderDetailHead(data, false), offBanner, isOff || !xpOn() ? '' : awardForm, labelsPanel,
-        renderLog(data, async (xpId) => {
+      const ro = !editable(scouts.find((s) => s.id === data.id)); // another patrol's scout, seen by a mod: nothing to change
+      if (ro) {
+        form.querySelectorAll('input, textarea, select').forEach((x) => { x.disabled = true; });
+        form.querySelectorAll('button').forEach((b) => b.remove()); // save and the picture buttons
+      }
+      box.append(renderDetailHead(data, false), offBanner, ro ? el('p', { class: 'panel hint' }, tu('view_only_scout')) : '', ro || isOff || !xpOn() ? '' : awardForm, ro ? '' : labelsPanel,
+        renderLog(data, ro ? null : async (xpId) => {
           if (!(await confirmBox(t('confirm_undo'), t('undo')))) return;
           try { await api('/api/xp/' + xpId, 'DELETE'); await refresh(); } catch (e) { fail(e); }
         }),
-        el('div', { style: 'height:1.25rem' }), form, promotePanel, del, hardDel);
+        el('div', { style: 'height:1.25rem' }), form, ro ? '' : promotePanel, ro ? '' : del, ro ? '' : hardDel);
     }
 
     $('addForm').querySelectorAll('input.phone').forEach((input) => input.addEventListener('input', () => { const v = digitsOnly(input.value); if (v !== input.value) input.value = v; }));
@@ -627,13 +567,32 @@
     const meetingLabel = (m) => fmtDay(m.meeting_date) + (m.title ? ' · ' + m.title : '');
     const countText = (n, of) => t('att_count').replace('{n}', fmt(n)).replace('{m}', fmt(of));
     // the scouts that can be on a sheet: the troop's active scouts, except the super admin who belongs to no troop
-    const sheetScouts = () => scouts.filter((s) => s.active && !s.is_super);
+    // (a patrol meeting's sheet lists only that patrol's scouts)
+    const sheetScouts = (m) => scouts.filter((s) => s.active && !s.is_super && (!m || m.kind !== 'patrol' || s.patrol_id === m.patrol_id));
+    const kindName = (k) => tu('att_kind_' + k); // "Meeting", "Event", and the patrol meeting: اجتماع رهط for the Rovers, اجتماع طليعة for the others
+    const meetingPatrol = (m) => (m.kind === 'patrol' ? patrols.find((p) => p.id === m.patrol_id) : null);
+    const kindChip = (m) => kindName(m.kind) + (meetingPatrol(m) ? ' · ' + patrolName(meetingPatrol(m)) : '');
+    // the new-meeting form: a mod only adds patrol meetings (for its own patrol, set by the server); the others choose the type, and a patrol for a patrol meeting
+    function setupMeetingForm() {
+      const f = $('meetingForm').elements, regular = patrols.filter((p) => !p.is_leadership);
+      f.patrol_id.replaceChildren(...regular.map((p) => el('option', { value: String(p.id) }, patrolName(p))));
+      $('kindPatrolOpt').disabled = !regular.length; // no patrols yet: nothing to hold a patrol meeting for
+      $('kindLabel').classList.toggle('hidden', isMod());
+      $('meetingFormTitle').classList.toggle('hidden', isMod()); $('meetingFormTitleMod').classList.toggle('hidden', !isMod());
+      syncMeetingKind();
+    }
+    function syncMeetingKind() {
+      const f = $('meetingForm').elements, choose = !isMod() && f.kind.value === 'patrol';
+      $('meetingPatrolLabel').classList.toggle('hidden', !choose); f.patrol_id.required = choose;
+    }
+    $('meetingForm').elements.kind.addEventListener('change', syncMeetingKind);
     async function openAttendance(id) {
       try {
         meeting = null;
         const f = $('meetingForm').elements.date; if (!f.value) f.value = today(); f.max = today();
         $('meetingXp').classList.toggle('hidden', !xpOn()); // the XP fields only where the troop uses XP
-        $('meetingForm').classList.toggle('hidden', isMod()); $('attHint').classList.toggle('hidden', isMod()); // a mod only opens meetings and marks attendance
+        $('meetingForm').classList.toggle('hidden', modNoPatrol()); $('attNoPatrol').classList.toggle('hidden', !modNoPatrol()); $('attHint').classList.toggle('hidden', isMod()); // a mod adds patrol meetings (it needs a patrol) and marks attendance
+        setupMeetingForm();
         [meetings, attSummary] = await Promise.all([api('/api/meetings'), api('/api/attendance/summary')]);
         if (id) meeting = await api('/api/meetings/' + id);
       } catch (e) { fail(e); }
@@ -647,15 +606,15 @@
     // search the list by title or date (any way the date is written here), and filter it by type
     const meetingHit = (m) => {
       const q = norm($('meetingQ').value.trim()), k = $('meetingKind').value;
-      return (!k || m.kind === k) && (!q || [m.title, m.meeting_date, fmtDay(m.meeting_date), t('att_kind_' + m.kind)].some((v) => norm(v).includes(q)));
+      return (!k || m.kind === k) && (!q || [m.title, m.meeting_date, fmtDay(m.meeting_date), kindChip(m)].some((v) => norm(v).includes(q)));
     };
     $('meetingQ').addEventListener('input', frame(() => drawMeetings())); $('meetingKind').addEventListener('change', () => drawMeetings());
     function drawMeetings() {
-      const total = sheetScouts().length, shown = meetings.filter(meetingHit);
+      const shown = meetings.filter(meetingHit);
       $('meetingList').replaceChildren(...(shown.length ? shown.map((m) => el('li', {},
         el('button', { class: 'btn quiet-link grow', type: 'button', style: 'text-align:start;background:none;border:0;color:inherit;font:inherit;cursor:pointer;padding:0', onclick: () => openAttendance(m.id) }, el('b', {}, meetingLabel(m))),
-        el('span', { class: 'chip' }, t('att_kind_' + m.kind)),
-        el('small', {}, countText(m.present, total)))) : [el('li', { class: 'empty' }, t(meetings.length ? 'no_results' : 'att_none_yet'))]));
+        el('span', { class: 'chip' }, kindChip(m)),
+        el('small', {}, countText(m.present, sheetScouts(m).length)))) : [el('li', { class: 'empty' }, t(meetings.length ? 'no_results' : 'att_none_yet'))]));
       const rows = sheetScouts().map((s) => ({ s, a: attSummary.find((x) => x.id === s.id) || { attended: 0, total: 0 } }))
         .sort((x, y) => (y.a.total ? y.a.attended / y.a.total : 0) - (x.a.total ? x.a.attended / x.a.total : 0) || x.s.name.localeCompare(y.s.name, state.lang));
       $('attSummary').replaceChildren(...(meetings.length ? rows.map(({ s, a }) => el('li', {},
@@ -666,7 +625,8 @@
     function drawSheet() {
       const m = meeting, box = $('attSheet');
       const present = new Set(m.present_ids), absent = new Set(m.absent_ids || []), excused = new Set(m.excused_ids || []); // absent = no excuse
-      const list = sheetScouts();
+      const list = sheetScouts(m);
+      const canEdit = !isMod(); // a mod only creates patrol meetings and marks attendance: it can't change or delete a meeting
       const counter = el('b', {});
       const refreshCount = () => {
         const nPresent = list.filter((s) => present.has(s.id)).length, nAbsent = list.filter((s) => absent.has(s.id)).length, nExcused = list.filter((s) => excused.has(s.id)).length;
@@ -676,7 +636,9 @@
       const titleIn = el('input', { type: 'text', maxlength: '80', value: m.title || '', required: '', 'aria-label': t('att_title'), placeholder: t('att_title') });
       const xpField = (value, key) => el('input', { type: 'number', min: '0', max: '1000', step: '1', value: String(value), required: '', 'aria-label': t(key) });
       const xpIn = xpField(m.xp, 'att_xp'), absentXpIn = xpField(m.absent_xp || 0, 'att_absent_xp');
-      const kindIn = el('select', { 'aria-label': t('att_type') }, ['meeting', 'event'].map((k) => el('option', { value: k, ...(k === m.kind ? { selected: '' } : {}) }, t('att_kind_' + k))));
+      const kindIn = el('select', { 'aria-label': t('att_type') }, ['meeting', 'event'].map((k) => el('option', { value: k, ...(k === m.kind ? { selected: '' } : {}) }, kindName(k))));
+      // a patrol meeting stays one (its patrol is fixed), so its type is shown, not chosen
+      const kindEl = m.kind === 'patrol' ? el('label', {}, el('span', {}, t('att_type')), el('span', { class: 'chip' }, kindChip(m))) : el('label', {}, el('span', {}, t('att_type')), kindIn);
       // scout id -> repaint functions of its buttons: an account that also has a regular patrol is listed twice (leaders' patrol + its own), and both copies stay in step
       const buttons = new Map();
       const sync = () => buttons.forEach((ps) => ps.forEach((paint) => paint()));
@@ -686,7 +648,7 @@
       const stateOf = (id) => (present.has(id) ? 'present' : absent.has(id) ? 'absent' : excused.has(id) ? 'excused' : 'none');
       const setAll = async (status) => {
         try { await api(`/api/meetings/${m.id}/attendance`, 'PUT', { status }); } catch (e) { return fail(e); }
-        list.forEach((s) => {
+        list.filter(editable).forEach((s) => { // (the server only changes the account's own scouts)
           if (status === 'none') { present.delete(s.id); absent.delete(s.id); excused.delete(s.id); }
           else if (status === 'present') { present.add(s.id); absent.delete(s.id); excused.delete(s.id); }
           else if (!present.has(s.id) && !excused.has(s.id)) absent.add(s.id); // the rest: absent without an excuse (excused ones stay)
@@ -695,6 +657,7 @@
       };
       // two buttons per scout: Present (filled when on) and Absent (filled red when on); pressing the one that is on clears the mark
       const row = (s) => {
+        const can = editable(s); // a mod sees everyone's marks but sets only its patrol's
         const pb = el('button', { type: 'button', class: 'btn small att-btn' }), ab = el('button', { type: 'button', class: 'btn small att-btn att-absent' }), eb = el('button', { type: 'button', class: 'btn small att-btn att-excused' });
         const paint = () => {
           const st = stateOf(s.id);
@@ -706,11 +669,12 @@
           eb.classList.toggle('ghost', st !== 'excused'); eb.setAttribute('aria-pressed', String(st === 'excused'));
         };
         paint(); buttons.set(s.id, [...(buttons.get(s.id) || []), paint]);
+        if (!can) pb.disabled = ab.disabled = eb.disabled = true;
         const press = (want) => async () => {
           const before = stateOf(s.id), status = before === want ? 'none' : want;
           pb.disabled = ab.disabled = eb.disabled = true;
           try { await api(`/api/meetings/${m.id}/attendance/${s.id}`, 'PUT', { status }); } catch (e) { pb.disabled = ab.disabled = eb.disabled = false; return fail(e); }
-          pb.disabled = ab.disabled = eb.disabled = false;
+          pb.disabled = ab.disabled = eb.disabled = !can;
           present.delete(s.id); absent.delete(s.id); excused.delete(s.id); if (status === 'present') present.add(s.id); if (status === 'absent') absent.add(s.id); if (status === 'excused') excused.add(s.id);
           const delta = xpWorth(status) - xpWorth(before);
           save(); msg(delta ? t('att_xp_change').replace('{xp}', signed(delta)) : t('saved'), true);
@@ -719,33 +683,33 @@
         return el('li', {}, el('span', { class: 'grow', dir: 'auto' }, s.name), el('span', { class: 'att-btns' }, pb, ab, eb));
       };
       // grouped like the scout lists: each patrol under its own heading (the leaders' patrol first), scouts without one last
-      const groups = patrols.map((p) => [patrolName(p), list.filter((s) => s.patrol_id === p.id || (p.is_leadership && s.in_council))])
+      const groups = m.kind === 'patrol' ? (list.length ? [[meetingPatrol(m) ? patrolName(meetingPatrol(m)) : '', list]] : []) : patrols.map((p) => [patrolName(p), list.filter((s) => s.patrol_id === p.id || (p.is_leadership && s.in_council))])
         .concat([[tu('no_patrol'), list.filter((s) => !s.patrol_id && !s.in_council)]]).filter(([, g]) => g.length);
       refreshCount();
       box.replaceChildren(
         el('div', { class: 'row' }, el('button', { class: 'btn small', type: 'button', onclick: () => openAttendance() }, t('att_back')), el('span', { class: 'grow' }), counter),
-        el('h2', {}, meetingLabel(m), ' ', el('span', { class: 'chip' }, t('att_kind_' + m.kind))),
+        el('h2', {}, meetingLabel(m), ' ', el('span', { class: 'chip' }, kindChip(m))),
         !xpOn() ? '' : el('p', { class: 'hint' }, m.xp ? t('att_xp_hint').replace('{xp}', fmt(m.xp)) : t('att_xp_none')),
         xpOn() && m.absent_xp ? el('p', { class: 'hint' }, t('att_absent_hint').replace('{xp}', fmt(m.absent_xp))) : '',
-        // a mod only marks attendance: the date, title, type and XP are changed by the others
-        ...(isMod() ? [] : [
+        // a mod only marks attendance on meetings and events; the date, title, type and XP of those are changed by the others
+        ...(!canEdit ? [] : [
         el('div', { class: 'grid2' }, el('label', {}, el('span', {}, t('att_date')), dateIn), el('label', {}, el('span', {}, t('att_title')), titleIn)),
-        xpOn() ? el('div', { class: 'grid2' }, el('label', {}, el('span', {}, t('att_type')), kindIn), el('label', {}, el('span', {}, t('att_xp')), xpIn)) : el('label', {}, el('span', {}, t('att_type')), kindIn),
+        xpOn() ? el('div', { class: 'grid2' }, kindEl, el('label', {}, el('span', {}, t('att_xp')), xpIn)) : kindEl,
         xpOn() ? el('label', {}, el('span', {}, t('att_absent_xp')), absentXpIn) : '',
         el('div', { class: 'row' },
           el('button', { class: 'btn small', type: 'button', onclick: async () => {
             if (!titleIn.reportValidity() || !xpIn.reportValidity() || !absentXpIn.reportValidity() || !dateIn.reportValidity()) return; // a title is required
             try {
-              await api('/api/meetings/' + m.id, 'PUT', { date: dateIn.value, title: titleIn.value, kind: kindIn.value, xp: xpIn.value, absent_xp: absentXpIn.value });
-              m.meeting_date = dateIn.value; m.title = titleIn.value.trim() || null; m.kind = kindIn.value; m.xp = Number(xpIn.value); m.absent_xp = Number(absentXpIn.value);
+              await api('/api/meetings/' + m.id, 'PUT', { date: dateIn.value, title: titleIn.value, kind: m.kind === 'patrol' ? 'patrol' : kindIn.value, xp: xpIn.value, absent_xp: absentXpIn.value });
+              m.meeting_date = dateIn.value; m.title = titleIn.value.trim() || null; m.kind = m.kind === 'patrol' ? 'patrol' : kindIn.value; m.xp = Number(xpIn.value); m.absent_xp = Number(absentXpIn.value);
               loadScouts().catch(() => {}); msg(t('saved'), true); drawSheet();
             } catch (e) { fail(e); }
           } }, t('save')),
-          myRole !== 'mod' ? el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
+          el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
             if (!(await confirmBox(t('confirm_delete_meeting')))) return;
             try { await api('/api/meetings/' + m.id, 'DELETE'); msg(''); await openAttendance(); } catch (e) { fail(e); }
-          } }, t('delete')) : '')]),
-        el('div', { class: 'row', style: 'margin:.75rem 0' },
+          } }, t('delete')))]),
+        modNoPatrol() ? '' : el('div', { class: 'row', style: 'margin:.75rem 0' }, // (a mod with no patrol has no one to mark)
           el('button', { class: 'btn small', type: 'button', onclick: () => setAll('present') }, t('att_all')),
           el('button', { class: 'btn ghost small', type: 'button', onclick: () => setAll('absent') }, t('att_rest_absent')),
           el('button', { class: 'btn quiet small', type: 'button', onclick: () => setAll('none') }, t('att_clear'))),
@@ -754,45 +718,10 @@
     $('meetingForm').addEventListener('submit', async (ev) => {
       ev.preventDefault();
       const f = new FormData(ev.target);
-      try { const m = await api('/api/meetings', 'POST', { date: f.get('date'), title: f.get('title'), kind: f.get('kind'), xp: f.get('xp'), absent_xp: f.get('absent_xp') }); ev.target.elements.title.value = ''; ev.target.elements.xp.value = '10'; ev.target.elements.absent_xp.value = '0'; msg(''); await openAttendance(m.id); }
+      const kind = isMod() ? 'patrol' : f.get('kind'); // (the server puts a mod's meeting in the mod's own patrol)
+      try { const m = await api('/api/meetings', 'POST', { date: f.get('date'), title: f.get('title'), kind, patrol_id: kind === 'patrol' && !isMod() ? f.get('patrol_id') : undefined, xp: f.get('xp'), absent_xp: f.get('absent_xp') }); ev.target.elements.title.value = ''; ev.target.elements.xp.value = '10'; ev.target.elements.absent_xp.value = '0'; msg(''); await openAttendance(m.id); }
       catch (e) { fail(e); }
     });
-
-    // ---------- activity log ----------
-    let logRows = [];
-    async function loadLog() { try { logRows = await api('/api/audit'); drawLog(); } catch (e) { fail(e); } }
-    function describe(r) {
-      const m = r.meta || {}, ar = state.lang === 'ar';
-      const act = ar ? m.activity_ar : m.activity_en;
-      const verb = tu('audit_' + r.action);
-      switch (r.action) {
-        case 'xp_award': return `${verb} ${signed(m.xp)} ${t('xp')} (${act}) ${t('audit_to')} ${m.name}`;
-        case 'xp_undo': return `${verb} ${signed(m.xp)} ${t('xp')} (${act}) ${t('audit_from')} ${m.name}`;
-        case 'activity_add': return `${verb} ${ar ? m.name_ar : m.name_en} (${signed(m.xp)} ${t('xp')})`;
-        case 'activity_delete': return `${verb} ${ar ? m.name_ar : m.name_en}`;
-        case 'scout_patrol': return `${verb} ${m.name}${m.patrol ? ` (${m.patrol})` : ''}`;
-        case 'scout_promote': return `${verb} ${m.name} ${t('audit_to')} ${m.to}`;
-        case 'depot_reserve': case 'depot_unreserve': return `${verb} ${m.name} × ${fmt(m.quantity)}`; // build 34 entries: one item each
-        case 'attendance': return `${m.name} ${verb} ${m.title} (${signed(m.xp)} ${t('xp')})`;
-        case 'attendance_undo': return `${verb} ${m.name} — ${m.title} (${signed(-m.xp)} ${t('xp')})`;
-        case 'attendance_bulk': return `${verb} ${m.title}: ${fmt(m.count)} (${signed(m.xp)} ${t('xp')})`;
-        case 'absence': return `${m.name} ${verb} ${m.title} (${signed(m.xp)} ${t('xp')})`;
-        case 'absence_excused': return `${m.name} ${verb} ${m.title}`;
-        case 'absence_undo': return `${verb} ${m.name} — ${m.title} (${signed(-m.xp)} ${t('xp')})`;
-        case 'absence_bulk': case 'absence_bulk_undo': return `${verb} ${m.title}: ${fmt(m.count)} (${signed(m.xp)} ${t('xp')})`;
-        case 'attendance_bulk_undo': return `${verb} ${m.title}: ${fmt(m.count)} (${signed(-m.xp)} ${t('xp')})`;
-        case 'depot_book': case 'depot_unbook': case 'depot_take': case 'depot_return': return `${verb} ${(m.items || []).map((x) => `${ar ? x.name_ar : x.name_en} × ${fmt(x.quantity)}`).join(ar ? '، ' : ', ')}`;
-        case 'login': case 'logout': case 'password_change': return verb;
-        default: return `${verb} ${m.name || ''}`;
-      }
-    }
-    function drawLog() {
-      const ul = $('logList');
-      if (!logRows.length) { ul.replaceChildren(el('li', { class: 'empty' }, t('log_empty'))); return; }
-      ul.replaceChildren(...logRows.map((r) => el('li', {},
-        el('span', { class: 'grow' }, el('b', {}, r.leader_name), ' ', describe(r),
-          el('small', { style: 'display:block;opacity:.7' }, new Date(r.created_at).toLocaleString(locale(), { dateStyle: 'medium', timeStyle: 'short' }))))));
-    }
 
     // ---------- roles and tags ----------
     async function loadLabels() { try { labels = await api('/api/labels'); drawLabels(); drawList(); if (data && det) drawDetail(); } catch (e) { fail(e); } }
@@ -823,83 +752,28 @@
       catch (e) { fail(e); }
     });
 
-    // ---------- troops (super admin) ----------
-    const themeSelect = (cur) => el('select', { name: 'theme', 'aria-label': t('troop_theme') }, Object.keys(THEMES).map((k) => el('option', { value: k, ...(k === (cur || 'default') ? { selected: '' } : {}) }, t('theme_' + k))));
-    async function loadTroops() { try { troops = await api('/api/troops'); if (!troopById(activeTroop())) { chooseTroop(troops[0]?.id); await loadTroopData(); } fillTroopSelects(); drawTroops(); } catch (e) { fail(e); } }
-    function drawTroops() {
-      $('newTroopTheme').replaceChildren(...Object.keys(THEMES).map((k) => el('option', { value: k }, t('theme_' + k))));
-      $('troopList').replaceChildren(...troops.map((tr) => {
-        const editRow = el('form', { class: 'row troop-edit hidden' },
-          el('input', { name: 'name_en', type: 'text', maxlength: '60', value: tr.name_en, dir: 'ltr', 'aria-label': t('name_en') }),
-          el('input', { name: 'name_ar', type: 'text', maxlength: '60', value: tr.name_ar, dir: 'rtl', 'aria-label': t('name_ar') }),
-          el('input', { name: 'brand_en', type: 'text', maxlength: '40', value: tr.brand_en || '', dir: 'ltr', placeholder: t('brand_en'), 'aria-label': t('brand_en') }),
-          el('input', { name: 'brand_ar', type: 'text', maxlength: '40', value: tr.brand_ar || '', dir: 'rtl', placeholder: t('brand_ar'), 'aria-label': t('brand_ar') }),
-          el('input', { name: 'level', type: 'number', min: '1', max: '1000', step: '1', value: String(tr.level), required: '', style: 'max-width:6rem', title: t('troop_level'), 'aria-label': t('troop_level') }),
-          el('label', { class: 'check' }, el('input', { name: 'xp_enabled', type: 'checkbox', ...(tr.xp_enabled !== false ? { checked: '' } : {}) }), ' ', t('troop_xp')),
-          themeSelect(tr.theme),
-          el('button', { class: 'btn small', type: 'submit' }, t('save')));
-        editRow.addEventListener('submit', async (ev) => {
-          ev.preventDefault();
-          const f = new FormData(editRow);
-          try { await api('/api/troops/' + tr.id, 'PUT', { name_en: f.get('name_en'), name_ar: f.get('name_ar'), brand_en: f.get('brand_en'), brand_ar: f.get('brand_ar'), theme: f.get('theme'), level: f.get('level'), xp_enabled: f.get('xp_enabled') === 'on' }); await loadTroops(); if (tr.id === activeTroop()) chooseTroop(tr.id); msg(t('saved'), true); } catch (e) { fail(e); }
-        });
-        return el('li', { class: 'acct' },
-          el('span', { class: 'grow' }, troopName(tr), ` · ${t('troop_level')} ${fmt(tr.level)}`, tr.xp_enabled === false ? ` · ${t('troop_xp_off')}` : '', tr.id === activeTroop() && troops.length > 1 ? ` · ${t('working_here')}` : ''),
-          el('button', { class: 'btn ghost small', type: 'button', onclick: () => { editRow.classList.toggle('hidden'); editRow.querySelector('input').focus(); } }, t('edit')),
-          el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
-            if (!(await confirmBox(t('confirm_delete_troop')))) return;
-            try { await api('/api/troops/' + tr.id, 'DELETE'); await loadTroops(); } catch (e) { fail(e); }
-          } }, t('delete')),
-          editRow);
-      }));
-    }
-    $('troopForm').addEventListener('submit', async (ev) => {
-      ev.preventDefault();
-      const f = new FormData(ev.target);
-      try { await api('/api/troops', 'POST', { name_en: f.get('name_en'), name_ar: f.get('name_ar'), brand_en: f.get('brand_en'), brand_ar: f.get('brand_ar'), theme: f.get('theme'), level: f.get('level'), xp_enabled: f.get('xp_enabled') === 'on', copy_from: Number(f.get('copy_from')) || undefined }); ev.target.reset(); msg(t('saved'), true); await loadTroops(); }
-      catch (e) { fail(e); }
-    });
-
-    // ---------- leaders ----------
-    async function loadLeaders() { try { leaders = await api('/api/leaders'); drawLeaders(); } catch (e) { fail(e); } }
-    const acctName = (r) => t('acct_' + r);
-    function drawLeaders() {
-      $('leaderList').replaceChildren(...leaders.map((l) => {
-        const pwRow = el('form', { class: 'row troop-edit hidden' },
-          el('input', { type: 'password', name: 'password', minlength: '8', required: '', autocomplete: 'new-password', placeholder: t('reset_pw_for'), 'aria-label': t('reset_pw_for') }),
-          el('button', { class: 'btn small', type: 'submit' }, t('save')));
-        pwRow.addEventListener('submit', async (ev) => {
-          ev.preventDefault();
-          try { await api(`/api/leaders/${l.id}/password`, 'PUT', { password: new FormData(pwRow).get('password') }); pwRow.reset(); pwRow.classList.add('hidden'); msg(t('saved'), true); }
-          catch (e) { fail(e); }
-        });
-        return el('li', { class: 'acct' },
-          el('span', { class: 'grow' }, l.username, l.username === me ? ` ${t('you')}` : '', ' ',
-            el('span', { class: 'chip leader' }, acctName(l.role)),
-            l.role === 'super_admin' ? el('small', { style: 'display:block;opacity:.7' }, t('all_troops_acct')) : '',
-            l.scout_name && l.scout_name !== l.username ? el('small', { style: 'display:block;opacity:.7' }, `${t('scout_profile')} ${l.scout_name}`) : ''),
-          l.can_manage ? el('button', { class: 'btn ghost small', type: 'button', onclick: () => { pwRow.classList.toggle('hidden'); pwRow.querySelector('input').focus(); } }, t('reset_password')) : '',
-          l.can_manage ? el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
-            if (!(await confirmBox(t(l.role === 'admin' ? 'confirm_delete_admin' : 'confirm_delete_leader')))) return;
-            try { await api('/api/leaders/' + l.id, 'DELETE'); await loadLeaders(); } catch (e) { fail(e); }
-          } }, t('delete')) : '',
-          pwRow);
-      }));
-    }
-    $('leaderForm').addEventListener('submit', async (ev) => {
-      ev.preventDefault();
-      const f = new FormData(ev.target);
-      try { await api('/api/leaders', 'POST', { username: f.get('username'), password: f.get('password'), display_name: f.get('display_name'), role: f.get('role') }); ev.target.reset(); msg(t('saved'), true); await loadLeaders(); await loadScouts(); }
-      catch (e) { fail(e); }
-    });
-
     // ---------- login / boot ----------
+    // the super admin's "View as" choice: the accounts of every troop; picking one reloads the page as that account (read-only), the first entry goes back to the own account
+    const acctName = (r) => t('acct_' + r);
+    let viewAccts = [];
+    function fillViewSwitch(current) {
+      const sw = $('viewSwitch'), keep = current ?? sw.value;
+      sw.replaceChildren(el('option', { value: '' }, t('view_as_self')),
+        ...viewAccts.map((a) => el('option', { value: String(a.id) }, `${a.display_name || a.username} · ${acctName(a.role)} · ${state.lang === 'ar' ? a.troop_name_ar : a.troop_name_en}`)));
+      sw.value = keep; sw.setAttribute('aria-label', t('view_as_label'));
+    }
+    async function setupViewBar(r) {
+      try { viewAccts = await api('/api/view-as/accounts'); } catch { return; } // (the bar just stays hidden)
+      fillViewSwitch(r.viewing ? String(r.viewing.id) : '');
+      $('viewBar').classList.remove('hidden');
+    }
+    $('viewSwitch').addEventListener('change', () => { setViewAs($('viewSwitch').value); location.reload(); });
     async function enter(username, role, troop, look) {
       me = username; myRole = role || 'admin'; myTroop = troop ?? null;
       let saved = null; try { saved = parseInt(localStorage.getItem('leaderTroop'), 10) || null; } catch { /* ignore */ }
       state.troop = myTroop; // the super admin has none yet (a leader starts in their home troop): the first request below uses the first troop until one is chosen
       if (!isSuper()) applyTheme(look?.theme, { en: look?.brand_en, ar: look?.brand_ar });
-      show(true); applyRole(); showTab('scouts'); drawLeaders();
+      show(true); applyRole(); showTab('scouts');
       try {
         troops = await api('/api/troops');
         chooseTroop(roams() ? saved ?? myTroop : myTroop); // the super admin and leaders start in the troop they used last (leaders: else their own); everyone else in their own
@@ -908,6 +782,7 @@
         drawList(); drawPatrols();
       } catch (e) { fail(e); }
       drawDetail();
+      if (look?.real_role === 'super_admin') setupViewBar(look);
     }
     $('loginForm').addEventListener('submit', async (ev) => {
       ev.preventDefault();
@@ -915,14 +790,13 @@
       try {
         const r = await api('/api/login', 'POST', { username: f.get('username'), password: f.get('password') });
         $('loginErr').textContent = ''; ev.target.reset();
-        // signing in sends you back to the page you came from (or the dashboard), not into the leader area
+        // signing in sends you back to the page you came from (the Sign in link of another page names it); coming straight to the leader area, you stay in it
         // only a page of this site: the URL parser catches tricks like "/\evil.com" that a plain "starts with /" check lets through
-        let dest = '/';
         try {
-          const u = new URL(new URLSearchParams(location.search).get('next') || '/', location.origin);
-          if (u.origin === location.origin && u.pathname !== '/leader.html') dest = u.pathname + u.search + u.hash;
-        } catch { /* malformed: go to the dashboard */ }
-        location.replace(dest);
+          const u = new URL(new URLSearchParams(location.search).get('next') || '/leader.html', location.origin);
+          if (u.origin === location.origin && u.pathname !== '/leader.html') { location.replace(u.pathname + u.search + u.hash); return; }
+        } catch { /* malformed: stay in the leader area */ }
+        location.reload();
       } catch (e) { $('loginErr').textContent = errText(e); }
     });
 
@@ -930,7 +804,7 @@
       if ($('app').classList.contains('hidden')) return;
       // the scout details form is rebuilt in the new language: keep what was typed but not saved yet
       const form = $('detailForm'), typed = form && Object.fromEntries(new FormData(form));
-      paintUnits(); fillTroopSelects(); drawList(); drawDetail(); drawActs(); drawPatrols(); drawLabels(); drawTroops(); drawLeaders(); drawLog(); drawAttendance();
+      paintUnits(); fillTroopSelects(); paintTroopLine(troopById(activeTroop())); if (viewAccts.length) fillViewSwitch(); drawList(); drawDetail(); drawActs(); drawPatrols(); drawLabels(); drawAttendance();
       const again = $('detailForm');
       if (typed && again) Object.entries(typed).forEach(([k, v]) => { if (again.elements[k]) again.elements[k].value = v; });
     });
