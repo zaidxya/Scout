@@ -815,12 +815,12 @@ app.delete('/api/posts/:id', requireLeader, requirePoster, wrap(async (req, res)
   res.json({ ok: true });
 }));
 
-// ---- weekly reports: what each troop did at its Saturday meeting. Signed-in accounts read them all; the super admin and leaders write for any troop,
+// ---- weekly reports: what each troop did at its Saturday meeting. Everyone (visitors too) can read them all; the super admin and leaders write for any troop,
 // admins and mods only for their own troop (one report per troop and Saturday) ----
 const isSaturday = (d) => new Date(d + 'T00:00:00Z').getUTCDay() === 6;
-app.get('/api/reports', requireLeader, wrap(async (req, res) => {
+app.get('/api/reports', wrap(async (req, res) => { // public: the author is shown by scout name only (never a login username)
   res.json((await pool.query(
-    `SELECT r.id, r.troop_id, r.week_date::text AS week_date, r.body, r.updated_at, COALESCE(sc.name, l.username) AS author
+    `SELECT r.id, r.troop_id, r.week_date::text AS week_date, r.body, r.updated_at, sc.name AS author
      FROM weekly_reports r LEFT JOIN leaders l ON l.id = COALESCE(r.updated_by, r.created_by) LEFT JOIN scouts sc ON sc.id = l.scout_id
      ORDER BY r.week_date DESC, r.troop_id LIMIT 600`)).rows);
 }));

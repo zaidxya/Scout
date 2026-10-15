@@ -354,7 +354,7 @@ function paintMenu() {
     let sum = d.querySelector('summary'), list = d.querySelector('.menu-list');
     if (!sum) { sum = document.createElement('summary'); list = document.createElement('div'); list.className = 'menu-list'; d.append(sum, list); }
     sum.textContent = t(SITE_PAGES[here][1]);
-    const links = Object.entries(SITE_PAGES).filter(([k]) => k !== here && k !== 'account' && (k !== 'reports' || signedIn === true) && (k !== 'admin' || (signedIn === true && meRole === 'super_admin'))).map(([k, [href, key]]) => menuLink(href, key, k)); // (My account is not a regular entry: it takes the place of Sign in once signed in)
+    const links = Object.entries(SITE_PAGES).filter(([k]) => k !== here && k !== 'account' && (k !== 'admin' || (signedIn === true && meRole === 'super_admin'))).map(([k, [href, key]]) => menuLink(href, key, k)); // (My account is not a regular entry: it takes the place of Sign in once signed in)
     // visitors who aren't signed in get a Sign in option (the sign-in form lives on the leader page, so not shown there)
     if (signedIn === false && here !== 'leader') {
       links.push(menuLink('/leader.html?next=' + encodeURIComponent(location.pathname + location.search), 'sign_in', 'signin', 'signin'));

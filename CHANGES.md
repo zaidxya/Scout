@@ -582,3 +582,11 @@ Files touched: `server.js`, `schema.sql`, `reset-password.js`, `public/common.js
 - How: a block at the end of `common.js` intercepts the open (mouse down, a tap that isn't a scroll, Space / Enter / Alt+Down) and shows its own list; choosing sets the select's value and fires `input` and `change`, so the existing handlers (`troopSwitch`, `viewSwitch`...) are unchanged. The select itself stays: it shows the choice, takes focus and is validated and submitted as before. A MutationObserver also enhances selects the pages create later. Keyboard and screen readers: Space / Enter / Alt+Down open it, arrows move, Enter chooses, Esc closes, typing jumps to an option; the arrow keys on a closed select still change it natively. `data-native` opts a select out.
 - The selects get a small arrow of their own (`appearance: none` + a chevron), since the browser's is gone. Styles at the end of `style.css` (`.cs-*`, reusing the sheet animations of the header menu).
 - Files touched: `public/common.js`, `public/style.css`, `README.md`, `CHANGES.md`. Scripts syntax-checked; **not run in a browser: the tap handling on real phones (iOS especially) is the thing to try first**.
+
+
+## Weekly reports are public (build 76, "public reports")
+
+- **Everyone can read the weekly reports**, signed in or not. `GET /api/reports` no longer needs a session; writing and deleting (`PUT`, `DELETE`) still need a signed-in account with the same rules as before. The author of a report is now shown by **scout name only** (the login username is no longer a fallback, since the route is public).
+- **Page:** `reports.html` loads for visitors with the weeks and every troop's report; the form and the Write/Edit buttons appear only for signed-in accounts, and visitors see a note to sign in to write. The **Weekly reports** entry in the header menu and the home page card are shown to everyone.
+- Texts changed (both languages): `reports_signin`, `reports_hint`.
+- Files touched: `server.js`, `public/reports.html`, `public/index.html`, `public/common.js`, `public/i18n/ar.json`, `public/i18n/en.json`, `README.md`, `CHANGES.md`. Syntax-checked; not run in a browser or against a database.

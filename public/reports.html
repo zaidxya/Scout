@@ -23,13 +23,13 @@
   </header>
   <main>
     <p id="toast" class="error" role="status"></p>
-    <!-- weekly reports are for signed-in accounts -->
+    <!-- the reports are public; visitors who are not signed in just don't get the form -->
     <div id="needSignin" class="panel hidden">
       <p data-i18n="reports_signin"></p>
       <a class="btn" href="/leader.html?next=%2Freports.html" data-i18n="sign_in"></a>
     </div>
-    <div id="app" class="hidden">
-      <form id="reportForm" class="panel">
+    <div id="app">
+      <form id="reportForm" class="panel hidden">
         <h2 id="reportFormTitle" data-i18n="report_new"></h2>
         <p class="hint" data-i18n="reports_hint"></p>
         <div class="grid2">
@@ -53,7 +53,7 @@
     let me = null, troops = [], reports = [], shown = 6, loaded = false; // shown: how many weeks are listed
     const form = $('reportForm');
     const roams = () => !!me && (me.role === 'super_admin' || me.role === 'leader'); // choose any troop; admins and mods only write their own troop's
-    const canEdit = (troopId) => roams() || troopId === me.troop_id;
+    const canEdit = (troopId) => !!me && (roams() || troopId === me.troop_id);
     const troopLabel = (x) => (state.lang === 'ar' ? x.name_ar : x.name_en);
     const msg = (text, ok) => { $('toast').textContent = text || ''; $('toast').className = 'error' + (ok ? ' ok' : ''); };
     const ymd = (d) => d.toLocaleDateString('en-CA'); // the local day, YYYY-MM-DD
@@ -118,17 +118,16 @@
 
     async function load(week, troop) {
       reports = (await api('/api/reports').catch(() => null)) || reports;
-      loaded = true; fillChoices(week, troop); syncForm(); drawWeeks();
+      loaded = true; if (me) { fillChoices(week, troop); syncForm(); } drawWeeks();
     }
-    document.addEventListener('langchange', () => { if (!me) return; fillChoices(form.elements.week.value, Number(form.elements.troop.value)); syncForm(); drawWeeks(); });
+    document.addEventListener('langchange', () => { if (me) { fillChoices(form.elements.week.value, Number(form.elements.troop.value)); syncForm(); } drawWeeks(); });
 
     (async () => {
       const troopsReq = api('/api/troops').catch(() => []);
       await initLang();
       me = await getMe();
-      if (!me) { $('needSignin').classList.remove('hidden'); return; }
       troops = await troopsReq;
-      $('app').classList.remove('hidden');
+      if (me) form.classList.remove('hidden'); else $('needSignin').classList.remove('hidden'); // visitors read only; signing in adds the form
       await load();
     })();
   </script>
