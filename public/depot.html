@@ -221,7 +221,7 @@
           el('b', { dir: 'auto' }, troopName({ name_ar: b.troop_name_ar, name_en: b.troop_name_en })),
           what,
           el('small', { class: 'depot-notes' }, t('depot_taken_at') + ' ' + fmtTime(b.taken_at) + (returned ? ' · ' + t('depot_returned_at') + ' ' + fmtTime(b.returned_at) : '')),
-          el('small', { class: 'depot-notes', dir: 'auto' }, [t('depot_by').replace('{name}', b.leader_name), b.note].filter(Boolean).join(' — '))),
+          el('small', { class: 'depot-notes', dir: 'auto' }, [t('depot_by').replace('{name}', withRole(b.leader_name, b.leader_role, b.leader_rovers)), b.note].filter(Boolean).join(' — '))),
         !returned && b.can_return ? el('button', { class: 'btn small', type: 'button', onclick: async () => {
           if (!(await confirmBox(t('depot_res_confirm'), t('depot_res_cancel')))) return;
           try { await api(`/api/depot/takes/${b.id}/return`, 'PUT'); msg(t('depot_put_back'), true); await load(); } catch (e) { fail(e); }
@@ -318,7 +318,7 @@
     (async () => {
       await initLang();
       const me = await getMe(); // null for a visitor: read-only
-      if (me) { isSuper = me.role === 'super_admin'; roams = isSuper || me.role === 'leader'; canEdit = roams || me.role === 'admin'; canReserve = true; myTroop = me.troop_id; basketKey = 'depot_basket:' + me.username; try { localStorage.removeItem('depot_basket'); } catch { /* ignore */ } } // the old shared key (build 35) is dropped
+      if (me) { isSuper = me.role === 'super_admin'; roams = isSuper || me.role === 'general_leader'; canEdit = roams || ['admin', 'mod', 'leader'].includes(me.role); canReserve = true; myTroop = me.troop_id; basketKey = 'depot_basket:' + me.username; try { localStorage.removeItem('depot_basket'); } catch { /* ignore */ } } // the old shared key (build 35) is dropped
       $('addBtn').classList.toggle('hidden', !isSuper);
       $('editNote').classList.toggle('hidden', canEdit);
       if (canReserve) {

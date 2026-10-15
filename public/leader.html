@@ -15,7 +15,7 @@
 </head>
 <body>
   <header>
-    <div class="grow"><h1><a class="brand" href="/"><img src="/logo-mark.png" alt=""><span data-i18n="title"></span><small id="brandSlogan" class="brand-slogan hidden"></small></a></h1><p data-i18n="leader_area"></p><p id="meName" dir="auto" style="font-weight:700;opacity:1;padding-inline-end:1rem;border-inline-end:1px solid rgba(var(--on-primary-rgb),.4)"></p></div>
+    <div class="grow"><h1><span class="brand"><img src="/logo-mark.png" alt=""><span data-i18n="title"></span><small id="brandSlogan" class="brand-slogan hidden"></small></span></h1><p data-i18n="leader_area"></p><p id="meName" dir="auto" style="font-weight:700;opacity:1;padding-inline-end:1rem;border-inline-end:1px solid rgba(var(--on-primary-rgb),.4)"></p></div>
     <nav>
       <details class="menu" data-page="leader"></details>
       <button id="langBtn" type="button" class="lang" data-i18n="lang_toggle">العربية</button>
@@ -65,6 +65,20 @@
           <label><span data-i18n="d_notes"></span><textarea name="notes" maxlength="1000"></textarea></label>
           <button class="btn" type="submit" data-i18n="add"></button>
         </form>
+
+        <!-- many scouts at once: a file or pasted text (a spreadsheet saved as CSV, or one filled-in form per scout), checked in a preview before anything is added -->
+        <div class="panel" id="importPanel">
+          <h2 data-i18n="import_title"></h2>
+          <p class="hint" data-i18n="import_hint"></p>
+          <div class="row">
+            <label class="btn ghost small" for="importFile" data-i18n="import_choose_file"></label>
+            <input id="importFile" type="file" accept=".csv,.tsv,.txt,text/csv,text/plain" class="hidden">
+            <button id="importTemplate" class="btn ghost small" type="button" data-i18n="import_template"></button>
+          </div>
+          <textarea id="importText" rows="7" dir="auto" data-i18n-ph="import_paste_ph"></textarea>
+          <button id="importRead" class="btn" type="button" data-i18n="import_read"></button>
+          <div id="importPreview" class="hidden"></div>
+        </div>
       </div>
 
       <div id="tab-scouts" class="cols">
@@ -183,14 +197,14 @@
     let scouts = [], current = null, data = null, det = null, acts = [], labels = [], patrols = [], leaders = [], troops = [], me = '', myRole = 'admin', myTroop = null; // myTroop: the account's own troop (null for the super admin, who is not bound to one)
     const activeTroop = () => state.troop; // the troop being worked on: myTroop, or whichever one the super admin or a leader switched to
     const isSuper = () => myRole === 'super_admin';
-    const roams = () => myRole === 'super_admin' || myRole === 'leader';
+    const roams = () => myRole === 'super_admin' || myRole === 'general_leader';
     const xpOn = () => troopById(activeTroop())?.xp_enabled !== false; // does the troop being worked on use the XP system? // can switch between troops (leaders have a home troop, the super admin none)
     const TABS = ['scouts', 'addscout', 'activities', 'patrols', 'attendance', 'labels'];
     const BTN_TABS = TABS; // (Administration has its own site, /admin.html)
-    const isMod = () => myRole === 'mod'; // a mod (رائد) has the members of its own patrol and their activity (and its own password)
-    const canLabels = () => isSuper() || myRole === 'admin'; // roles and tags: not for mods or leaders
+    const isMod = () => myRole === 'helper'; // a helper (عريف / رائد) has the members of its own patrol and their activity (and its own password)
+    const canLabels = () => isSuper(); // roles and tags: the super admin only
     // troops, accounts and the activity log are for the super admin only; roles & tags and activities also for admins (not leaders); a mod has just scouts, patrols and attendance
-    const tabAllowed = (n) => isMod() ? (n === 'scouts' || n === 'addscout' || n === 'attendance') : (n === 'labels' ? canLabels() : n === 'activities' ? myRole !== 'leader' && xpOn() : true);
+    const tabAllowed = (n) => isMod() ? (n === 'scouts' || n === 'addscout' || n === 'attendance') : (n === 'labels' ? canLabels() : n === 'activities' ? isSuper() && xpOn() : true);
 
     const msg = (text, ok) => { $('toast').textContent = text || ''; $('toast').className = 'error' + (ok ? ' ok' : ''); };
     const fail = (e) => { if (e.status === 401 && e.code === 'unauthorized') show(false); msg(errText(e)); };
@@ -514,6 +528,150 @@
       } catch (e) { fail(e); }
     });
 
+    // ---------- importing many scouts from a file or pasted text ----------
+    // Two shapes are understood: a table (first row = column names, separated by commas, semicolons or tabs: a spreadsheet saved as CSV or copied from Excel)
+    // and filled-in forms (one block per scout, lines like "الاسم: ..."). Labels in Arabic or English are matched by meaning; nothing is added before the preview is confirmed.
+    const IMPORT_FIELDS = ['name', 'full_name', 'phone', 'join_date', 'birth_date', 'guardian_name', 'guardian_phone', 'address', 'medical_notes', 'notes'];
+    const IMPORT_LABELS = { name: 'd_name', full_name: 'd_full_name', phone: 'd_phone', join_date: 'd_join_date', birth_date: 'd_birth_date', guardian_name: 'd_guardian_name', guardian_phone: 'd_guardian_phone', address: 'd_address', medical_notes: 'd_medical', notes: 'd_notes' };
+    const IMPORT_MAX = 200, IMPORT_LIMITS = { name: 60, full_name: 120, address: 300, guardian_name: 120, medical_notes: 1000, notes: 1000 };
+    const westDigits = (v) => String(v ?? '').replace(/[٠-٩]/g, (d) => d.charCodeAt(0) - 0x660).replace(/[۰-۹]/g, (d) => d.charCodeAt(0) - 0x6f0);
+    const plain = (s) => westDigits(s).toLowerCase().replace(/[\u064B-\u065F\u0640]/g, '').replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي').replace(/[^a-z0-9\u0600-\u06FF]+/g, ' ').trim();
+    // which field a column name / form label means (null: not one of ours)
+    function fieldOfLabel(label) {
+      const n = plain(label);
+      if (!n) return null;
+      const guardian = /(ولي|اهل|والد|guardian|parent)/.test(n), phoneWord = /(هاتف|جوال|موبايل|محمول|تلفون|رقم|phone|mobile|tel|cell)/.test(n);
+      if (guardian && phoneWord) return 'guardian_phone';
+      if (guardian) return 'guardian_name';
+      if (/(ميلاد|ولاده|مواليد|birth|dob|born)/.test(n)) return 'birth_date';
+      if (/(انتساب|انضمام|التحاق|join)/.test(n)) return 'join_date';
+      if (/(عنوان|سكن|address|residence)/.test(n)) return 'address';
+      if (/(طبي|صحي|صحه|مرض|امراض|حساسي|medical|health|allerg)/.test(n)) return 'medical_notes';
+      if (/(ملاحظ|note|هواي|اهتمام|hobb|interest)/.test(n)) return 'notes';
+      if (phoneWord) return 'phone';
+      if (/(كامل|ثلاثي|رباعي|full)/.test(n)) return 'full_name';
+      if (/(اسم|name|كشاف|scout)/.test(n)) return 'name';
+      return null;
+    }
+    // a date as YYYY-MM-DD from 2013-04-20, 20/4/2013, 20-04-2013 or 20.4.2013 (day first); null when it is not a real day
+    function readDate(v) {
+      const s = westDigits(v).trim(); let m, y, mo, d;
+      if ((m = s.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/))) [y, mo, d] = [m[1], m[2], m[3]];
+      else if ((m = s.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})/))) [d, mo, y] = [m[1], m[2], m[3]];
+      else return null;
+      const iso = `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`, back = new Date(iso + 'T00:00:00Z');
+      return !isNaN(back) && back.toISOString().slice(0, 10) === iso ? iso : null;
+    }
+    // CSV / TSV with quotes ("a, b", "" inside) and line breaks inside quotes
+    function readTable(text, sep) {
+      const rows = []; let row = [], cell = '', q = false;
+      for (let i = 0; i < text.length; i++) {
+        const c = text[i];
+        if (q) { if (c === '"') { if (text[i + 1] === '"') { cell += '"'; i++; } else q = false; } else cell += c; }
+        else if (c === '"' && !cell) q = true;
+        else if (c === sep) { row.push(cell); cell = ''; }
+        else if (c === '\n' || c === '\r') { if (c === '\r' && text[i + 1] === '\n') i++; row.push(cell); cell = ''; if (row.some((x) => x.trim())) rows.push(row); row = []; }
+        else cell += c;
+      }
+      row.push(cell); if (row.some((x) => x.trim())) rows.push(row);
+      return rows;
+    }
+    // text -> records ({field: value}), or [] when neither shape fits
+    function readRecords(text) {
+      text = text.replace(/^\uFEFF/, '');
+      const first = text.split(/\r?\n/).find((l) => l.trim()) || '';
+      const sep = [',', ';', '\t'].map((s) => [s, first.split(s).length - 1]).sort((a, b) => b[1] - a[1])[0];
+      if (sep[1] > 0) {
+        const rows = readTable(text, sep[0]), map = rows[0].map(fieldOfLabel);
+        if (new Set(map.filter(Boolean)).size >= 2 && (map.includes('name') || map.includes('full_name'))) {
+          return rows.slice(1).map((r) => { const rec = {}; map.forEach((f, i) => { if (f && !rec[f] && (r[i] || '').trim()) rec[f] = r[i].trim(); }); return rec; }).filter((r) => Object.keys(r).length);
+        }
+      }
+      // forms: "label: value" lines; a new scout starts when a field comes round again or at a line of dashes / equals signs
+      const recs = []; let cur = {}, last = null;
+      const push = () => { if (Object.keys(cur).length) recs.push(cur); cur = {}; last = null; };
+      for (const line of text.split(/\r?\n/)) {
+        if (/^\s*([-=*_#~]{3,})\s*$/.test(line)) { push(); continue; }
+        const m = line.match(/^\s*([^:：]{1,40}?)\s*[:：]\s*(.*)$/), f = m && fieldOfLabel(m[1]);
+        if (f) { if (cur[f] != null) push(); cur[f] = m[2].trim(); last = f; }
+        else if (line.trim() && last && ['address', 'medical_notes', 'notes'].includes(last)) cur[last] += ' ' + line.trim(); // a long answer carried onto the next line
+      }
+      push();
+      return recs.filter((r) => r.name || r.full_name);
+    }
+    // a record -> a row to preview: cleaned values, warnings, and whether it can be added
+    function importRow(rec, i, seen) {
+      const v = {}, warn = [];
+      IMPORT_FIELDS.forEach((f) => { v[f] = String(rec[f] ?? '').trim(); });
+      if (!v.name && v.full_name) { const w = v.full_name.split(/\s+/); v.name = w.length > 1 ? w[0] + ' ' + w[w.length - 1] : w[0]; } // no display name: first and last name
+      ['phone', 'guardian_phone'].forEach((f) => { v[f] = westDigits(v[f]).replace(/\D/g, ''); });
+      ['join_date', 'birth_date'].forEach((f) => { if (!v[f]) return; const d = readDate(v[f]); if (d) v[f] = d; else { warn.push(t('import_bad_date').replace('{field}', t(IMPORT_LABELS[f]))); v[f] = ''; } });
+      Object.entries(IMPORT_LIMITS).forEach(([f, max]) => { if (v[f].length > max) { v[f] = v[f].slice(0, max); warn.push(t('import_cut').replace('{field}', t(IMPORT_LABELS[f]))); } });
+      const key = plain(v.name);
+      const dup = key && (scouts.some((s) => plain(s.name) === key) || seen.has(key));
+      if (key) seen.add(key);
+      return { i, v, warn, ok: !!v.name, dup: !!dup };
+    }
+    let importRows = [];
+    function drawImport() {
+      const box = $('importPreview');
+      if (!importRows.length) { box.classList.remove('hidden'); box.replaceChildren(el('p', { class: 'empty' }, t('import_none'))); return; }
+      const picks = []; // [row, checkbox]
+      const count = () => picks.filter(([r, c]) => r.ok && c.checked).length;
+      const go = el('button', { class: 'btn', type: 'button' });
+      const sync = () => { const n = count(); go.textContent = t('import_go').replace('{n}', fmt(n)); go.disabled = !n; };
+      const cols = IMPORT_FIELDS.filter((f) => importRows.some((r) => r.v[f]));
+      const head = el('tr', {}, el('th', {}), el('th', {}, '#'), ...cols.map((f) => el('th', {}, t(IMPORT_LABELS[f]))), el('th', {}, t('import_status')));
+      const body = importRows.map((r) => {
+        const c = el('input', { type: 'checkbox', 'aria-label': r.v.name || String(r.i + 1) }); c.checked = r.ok && !r.dup; c.disabled = !r.ok; c.addEventListener('change', sync);
+        picks.push([r, c]);
+        const status = !r.ok ? t('import_st_noname') : r.dup ? t('import_st_dup') : r.warn.length ? r.warn.join('، ') : t('import_st_ok');
+        return el('tr', { class: r.ok ? '' : 'import-bad' }, el('td', {}, c), el('td', {}, String(r.i + 1)), ...cols.map((f) => el('td', { dir: 'auto' }, r.v[f])), el('td', { class: !r.ok || r.dup || r.warn.length ? 'import-note' : '' }, status));
+      });
+      const ready = importRows.filter((r) => r.ok && !r.dup).length;
+      go.addEventListener('click', async () => {
+        const chosen = picks.filter(([r, c]) => r.ok && c.checked).map(([r]) => r.v);
+        if (!chosen.length) return;
+        go.disabled = true;
+        try {
+          const res = await api('/api/scouts/bulk', 'POST', { scouts: chosen });
+          importRows = []; box.classList.add('hidden'); box.replaceChildren(); $('importText').value = '';
+          msg(t('import_done').replace('{n}', fmt(res.created)) + (res.failed?.length ? ' ' + t('import_refused').replace('{n}', fmt(res.failed.length)) : ''), true);
+          showTab('scouts'); await loadScouts();
+        } catch (e) { sync(); fail(e); }
+      });
+      box.classList.remove('hidden');
+      box.replaceChildren(
+        el('p', { class: 'hint' }, t('import_found').replace('{n}', fmt(importRows.length)).replace('{ok}', fmt(ready)).replace('{skip}', fmt(importRows.length - ready))),
+        el('div', { style: 'overflow-x:auto;margin:.5rem 0' }, el('table', { class: 'import-table' }, el('thead', {}, head), el('tbody', {}, body))), go);
+      sync();
+    }
+    $('importRead').addEventListener('click', () => {
+      const text = $('importText').value; msg('');
+      const seen = new Set(), recs = text.trim() ? readRecords(text) : [];
+      if (recs.length > IMPORT_MAX) { importRows = []; $('importPreview').classList.remove('hidden'); $('importPreview').replaceChildren(el('p', { class: 'empty' }, t('import_too_many').replace('{n}', fmt(IMPORT_MAX)))); return; }
+      importRows = recs.map((rec, i) => importRow(rec, i, seen));
+      drawImport();
+    });
+    $('importFile').addEventListener('change', async (ev) => {
+      const file = ev.target.files[0]; ev.target.value = '';
+      if (!file) return;
+      try {
+        const buf = await file.arrayBuffer();
+        let text; try { text = new TextDecoder('utf-8', { fatal: true }).decode(buf); } catch { text = new TextDecoder('windows-1256').decode(buf); } // a spreadsheet's "ANSI" Arabic
+        $('importText').value = text; $('importRead').click();
+      } catch { msg(t('import_file_error')); }
+    });
+    // a template to fill in (opens in Excel with Arabic intact)
+    $('importTemplate').addEventListener('click', () => {
+      const q = (s) => '"' + String(s).replace(/"/g, '""') + '"';
+      const example = state.lang === 'ar' ? ['أحمد خالد', 'أحمد خالد الحسن', '0912345678', '2025-09-01', '2013-04-20', 'خالد الحسن', '0933445566', 'دمشق', '', 'كرة القدم'] : ['Ahmad Khaled', 'Ahmad Khaled Alhasan', '0912345678', '2025-09-01', '2013-04-20', 'Khaled Alhasan', '0933445566', 'Damascus', '', 'Football'];
+      const csv = '\uFEFF' + [IMPORT_FIELDS.map((f) => q(t(IMPORT_LABELS[f]))), example.map(q)].map((r) => r.join(',')).join('\r\n') + '\r\n';
+      const a = el('a', { href: URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' })), download: 'scouts-template.csv' });
+      document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+    });
+    document.addEventListener('langchange', () => { if (importRows.length) drawImport(); });
+
     // ---------- patrols (admins and the super admin manage them) ----------
     async function loadPatrols() { try { patrols = await api('/api/patrols?troop=' + activeTroop()); drawPatrols(); drawList(); } catch (e) { fail(e); } }
     function drawPatrols() {
@@ -754,12 +912,12 @@
 
     // ---------- login / boot ----------
     // the super admin's "View as" choice: the accounts of every troop; picking one reloads the page as that account (read-only), the first entry goes back to the own account
-    const acctName = (r) => t('acct_' + r);
+    const acctName = (a) => accountLevel(a.role, a.rovers);
     let viewAccts = [];
     function fillViewSwitch(current) {
       const sw = $('viewSwitch'), keep = current ?? sw.value;
       sw.replaceChildren(el('option', { value: '' }, t('view_as_self')),
-        ...viewAccts.map((a) => el('option', { value: String(a.id) }, `${a.display_name || a.username} · ${acctName(a.role)} · ${state.lang === 'ar' ? a.troop_name_ar : a.troop_name_en}`)));
+        ...viewAccts.map((a) => el('option', { value: String(a.id) }, `${a.display_name || a.username} · ${acctName(a)} · ${state.lang === 'ar' ? a.troop_name_ar : a.troop_name_en}`)));
       sw.value = keep; sw.setAttribute('aria-label', t('view_as_label'));
     }
     async function setupViewBar(r) {

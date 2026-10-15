@@ -82,7 +82,7 @@
             <p class="hint" data-i18n="pw_hint"></p>
             <p class="hint" data-unit="account_patrol_hint"></p>
             <div class="grid2">
-              <label><span data-i18n="account_type"></span><select name="role"><option value="admin" data-i18n="acct_admin"></option><option value="leader" data-i18n="acct_leader"></option><option value="mod" data-i18n="acct_mod"></option></select></label>
+              <label><span data-i18n="account_type"></span><select name="role"><option value="admin" data-i18n="acct_admin"></option><option value="general_leader" data-i18n="acct_general_leader"></option><option value="leader" data-i18n="acct_leader"></option><option value="mod" data-i18n="acct_mod"></option><option value="helper" data-i18n="acct_helper_opt"></option></select></label>
               <label><span data-i18n="report_troop"></span><select name="troop_id" id="acctTroop" required></select></label>
             </div>
             <label><span data-i18n="display_name"></span><input name="display_name" type="text" maxlength="60"></label>
@@ -116,7 +116,7 @@
     const fail = (e) => msg(errText(e));
     const troopName = (tr) => (tr ? (state.lang === 'ar' ? tr.name_ar : tr.name_en) : '');
     const troopById = (id) => troops.find((x) => x.id === id);
-    const acctName = (r) => t('acct_' + r);
+    const acctName = (l) => accountLevel(l.role, l.rovers); // an account row from the server (rovers: its troop is a Rovers one)
 
     function showTab(n) {
       if (!TABS.includes(n)) n = 'troops';
@@ -176,6 +176,15 @@
 
     // ---------- accounts: everyone, grouped by troop ----------
     async function loadAccounts() { try { accounts = await api('/api/leaders'); if (!troops.length) troops = await api('/api/troops'); drawAccounts(); } catch (e) { fail(e); } }
+    // the super admin's choice of level for an account (the helper's name depends on the account's troop)
+    function roleSelect(l) {
+      const sel = el('select', { 'aria-label': t('account_type'), class: 'role-pick' }, ['general_leader', 'admin', 'mod', 'leader', 'helper'].map((r) => el('option', { value: r, ...(r === l.role ? { selected: '' } : {}) }, accountLevel(r, l.rovers))));
+      sel.addEventListener('change', async () => {
+        try { await api(`/api/leaders/${l.id}/role`, 'PUT', { role: sel.value }); msg(t('saved'), true); await loadAccounts(); }
+        catch (e) { fail(e); sel.value = l.role; }
+      });
+      return sel;
+    }
     function accountRow(l) {
       const pwRow = el('form', { class: 'row troop-edit hidden' },
         el('input', { type: 'password', name: 'password', minlength: '8', required: '', autocomplete: 'new-password', placeholder: t('reset_pw_for'), 'aria-label': t('reset_pw_for') }),
@@ -187,11 +196,12 @@
       });
       return el('li', { class: 'acct' },
         el('span', { class: 'grow' }, l.username, l.username === me.username ? ` ${t('you')}` : '', ' ',
-          el('span', { class: 'chip leader' }, acctName(l.role)),
+          el('span', { class: 'chip leader' }, acctName(l)),
+          l.can_manage ? roleSelect(l) : '',
           l.scout_name && l.scout_name !== l.username ? el('small', { style: 'display:block;opacity:.7' }, `${t('scout_profile')} ${l.scout_name}`) : ''),
         l.can_manage ? el('button', { class: 'btn ghost small', type: 'button', onclick: () => { pwRow.classList.toggle('hidden'); pwRow.querySelector('input').focus(); } }, t('reset_password')) : '',
         l.can_manage ? el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
-          if (!(await confirmBox(t(l.role === 'admin' ? 'confirm_delete_admin' : 'confirm_delete_leader')))) return;
+          if (!(await confirmBox(t(l.role === 'admin' || l.role === 'mod' || l.role === 'leader' ? 'confirm_delete_admin' : 'confirm_delete_leader')))) return;
           try { await api('/api/leaders/' + l.id, 'DELETE'); await loadAccounts(); } catch (e) { fail(e); }
         } }, t('delete')) : '',
         pwRow);
@@ -212,8 +222,9 @@
     });
 
     // ---------- activity log: by day, newest first; filter by troop (asked from the server), type and text (on what is loaded) ----------
-    const CATS = { scouts: '#2b7a9b', xp: '#c98a12', depot: '#2f8f5b', content: '#8a4fb5', admin: '#b3261e' }; // type -> dot colour
-    const catOf = (a) => (/^(scout_|photo_|label)/.test(a) || /^patrol_/.test(a) ? 'scouts'
+    const CATS = { scouts: '#2b7a9b', xp: '#c98a12', music: '#d6577b', depot: '#2f8f5b', content: '#8a4fb5', admin: '#b3261e' }; // type -> dot colour
+    const catOf = (a) => (/^music_/.test(a) ? 'music'
+      : /^(scout_|photo_|label)/.test(a) || /^patrol_/.test(a) ? 'scouts'
       : /^(xp_|attendance|absence|meeting_|activity_)/.test(a) ? 'xp'
       : /^depot_/.test(a) ? 'depot'
       : /^(post_|report_)/.test(a) ? 'content' : 'admin'); // accounts, troops, passwords
@@ -232,8 +243,11 @@
       const act = ar ? m.activity_ar : m.activity_en;
       const verb = tu('audit_' + r.action);
       switch (r.action) {
-        case 'xp_award': return `${verb} ${signed(m.xp)} ${t('xp')} (${act}) ${t('audit_to')} ${m.name}`;
-        case 'xp_undo': return `${verb} ${signed(m.xp)} ${t('xp')} (${act}) ${t('audit_from')} ${m.name}`;
+        case 'xp_award': case 'music_xp_award': return `${verb} ${signed(m.xp)} ${t('xp')} (${act}) ${t('audit_to')} ${m.name}`;
+        case 'music_member_add': case 'music_member_group': return `${verb} ${m.name} (${t('music_g_' + m.group)} · ${t('music_sub_' + (m.sub || 1))})`;
+        case 'music_mark': return `${verb} ${m.name} — ${m.title}: ${t('music_st_' + m.status)}${m.xp ? ` (${signed(m.xp)} ${t('xp')})` : ''}`;
+        case 'music_mark_bulk': return `${verb} ${m.title}: ${t('music_st_' + m.status)} × ${fmt(m.count)}`;
+        case 'xp_undo': case 'music_xp_undo': return `${verb} ${signed(m.xp)} ${t('xp')} (${act}) ${t('audit_from')} ${m.name}`;
         case 'activity_add': return `${verb} ${ar ? m.name_ar : m.name_en} (${signed(m.xp)} ${t('xp')})`;
         case 'activity_delete': return `${verb} ${ar ? m.name_ar : m.name_en}`;
         case 'scout_patrol': return `${verb} ${m.name}${m.patrol ? ` (${m.patrol})` : ''}`;
@@ -248,7 +262,9 @@
         case 'absence_bulk': case 'absence_bulk_undo': return `${verb} ${m.title}: ${fmt(m.count)} (${signed(m.xp)} ${t('xp')})`;
         case 'attendance_bulk_undo': return `${verb} ${m.title}: ${fmt(m.count)} (${signed(-m.xp)} ${t('xp')})`;
         case 'depot_book': case 'depot_unbook': case 'depot_take': case 'depot_return': return `${verb} ${(m.items || []).map((x) => `${ar ? x.name_ar : x.name_en} × ${fmt(x.quantity)}`).join(ar ? '، ' : ', ')}`;
+        case 'report_week_delete': return `${verb} ${m.name ? fmtDay(m.name) : ''}`;
         case 'report_save': case 'report_delete': return `${verb} (${m.name ? fmtDay(m.name) : ''})`;
+        case 'leader_role': return `${verb} ${m.name}: ${accountLevel(m.from, false)} → ${accountLevel(m.role, false)}`;
         case 'password_change': return verb;
         default: return `${verb} ${m.name || ''}`;
       }
@@ -271,7 +287,7 @@
     }
     function drawLog() {
       const q = norm($('logQ').value.trim()), cat = $('logCat').value;
-      const rows = logRows.map((r) => ({ r, text: describe(r), cat: catOf(r.action) })).filter((x) => (!cat || x.cat === cat) && (!q || norm(x.r.leader_name + ' ' + x.text).includes(q)));
+      const rows = logRows.map((r) => ({ r, text: describe(r), cat: catOf(r.action) })).filter((x) => (!cat || x.cat === cat) && (!q || norm(withRole(x.r.leader_name, x.r.leader_role, x.r.leader_rovers) + ' ' + x.text).includes(q)));
       const days = [];
       rows.forEach((x) => { const d = dayOf(x.r.created_at); (days.length && days[days.length - 1][0] === d ? days[days.length - 1][1] : (days.push([d, []]), days[days.length - 1][1])).push(x); });
       $('logDays').replaceChildren(...(days.length ? days.flatMap(([d, g]) => [
@@ -279,7 +295,7 @@
         el('ul', { class: 'log-list' }, g.map(({ r, text, cat: c }) => el('li', { class: 'log-row' },
           el('span', { class: 'log-time' }, new Date(r.created_at).toLocaleTimeString(locale(), { hour: '2-digit', minute: '2-digit' })),
           el('span', { class: 'log-dot', style: `--dot:${CATS[c]}`, title: t('log_cat_' + c) }),
-          el('span', { class: 'log-text', dir: 'auto' }, el('b', {}, r.leader_name), ' ', text),
+          el('span', { class: 'log-text', dir: 'auto' }, r.leader_role ? el('span', { class: 'chip leader' }, accountLevel(r.leader_role, r.leader_rovers)) : '', ' ', el('b', {}, r.leader_name), ' ', text),
           r.troop_id ? el('span', { class: 'chip tag' }, troopName(troopById(r.troop_id))) : '')))]) : [el('p', { class: 'empty' }, t('log_empty'))]));
       $('logMore').classList.toggle('hidden', !logFull);
     }

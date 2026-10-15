@@ -8,7 +8,7 @@ const THEMES = {
   rovers: { logo: '/logo.jpg', wordmark: true, color: '#4a0313' },
   forest: { logo: '/logo-mark.png', wordmark: false, color: '#1d5c3f' }, // Forest (boys)
   forest_girls: { logo: '/logo-mark.png', wordmark: false, color: '#1d5c3f' },
-  ocean: { logo: '/logo-guides-v2.png', wordmark: false, color: '#14507a' }, // Aqua (guides): the fleur-de-lis outline in beige
+  ocean: { logo: '/logo-guides-v3.png', onWhite: true, wordmark: false, color: '#14507a' }, // Aqua (guides): the blue looping fleur-de-lis, on a white disc
   yellow: { logo: '/logo-cubs.png', onWhite: true, wordmark: false, color: '#f6c21c' }, // Yellow (cubs)
   yellow_hannabies: { logo: '/logo-hannabies.png', onWhite: true, wordmark: false, color: '#f6c21c' },
   red: { logo: '/logo-mark.png', wordmark: false, color: '#c62828' }, // Red (guides)
@@ -300,15 +300,19 @@ document.addEventListener('click', (e) => document.querySelectorAll('header deta
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') document.querySelectorAll('header details.menu[open]').forEach((d) => d.removeAttribute('open')); });
 
 // the header menu (same on every page): the button names the page you are on, the list holds the other pages
-const SITE_PAGES = { home: ['/', 'home'], scouts: ['/scouts.html', 'scout_list'], reports: ['/reports.html', 'reports_page'], leader: ['/leader.html', 'leader_area'], depot: ['/depot.html', 'depot'], admin: ['/admin.html', 'tab_admin'], account: ['/account.html', 'my_account'] };
+const SITE_PAGES = { home: ['/', 'home'], scouts: ['/scouts.html', 'scout_list'], reports: ['/reports.html', 'reports_page'], music: ['/music.html', 'music_page'], leader: ['/leader.html', 'leader_area'], depot: ['/depot.html', 'depot'], admin: ['/admin.html', 'tab_admin'], account: ['/account.html', 'my_account'] };
 let signedIn = null; // null = not known yet
 let meDisplay = null;
 // the session check runs once per page load and is shared: pages call getMe() instead of asking the server again (null = not signed in)
 let mePromise = null;
 const getMe = () => (mePromise ||= fetch('/api/me', { credentials: 'same-origin', headers: viewAsHeader() }).then((r) => (r.ok ? r.json() : null)).catch(() => null));
-let meRole = null, meViewing = null; // the role being shown (the viewed account's while the super admin is viewing as it) and that account
+// the name of an account level: the helper is عريف, but رائد in a Rovers troop (rovers = that account's troop has the Rovers theme)
+const accountLevel = (role, rovers) => t(role === 'helper' && rovers ? 'acct_helper_r' : 'acct_' + role);
+// a person's name with their level in front of it (just the name when the account is gone: role is null)
+const withRole = (name, role, rovers) => (role ? accountLevel(role, rovers) + ' ' + name : name);
+let meRole = null, meTheme = null, meViewing = null; // the role being shown (the viewed account's while the super admin is viewing as it) and that account
 getMe().then((me) => {
-  signedIn = !!me; meDisplay = me?.display_name || me?.username || null; meRole = me?.role || null; meViewing = me?.viewing || null;
+  signedIn = !!me; meDisplay = me?.display_name || me?.username || null; meRole = me?.role || null; meTheme = me?.theme || null; meViewing = me?.viewing || null;
   if (!meViewing && viewAsId()) setViewAs(null); // a stale choice (the account is gone, or this is not the super admin)
   paintMenu(); paintWelcome(); paintViewBanner();
 });
@@ -318,7 +322,7 @@ function paintViewBanner() {
   if (!meViewing || !state.dict.view_banner || !document.body) return;
   const b = document.createElement('div'); b.className = 'view-banner'; b.setAttribute('role', 'status');
   const txt = document.createElement('span');
-  txt.textContent = t('view_banner').replace('{name}', meViewing.display_name || meViewing.username).replace('{level}', t('acct_' + meViewing.role));
+  txt.textContent = t('view_banner').replace('{name}', meViewing.display_name || meViewing.username).replace('{level}', accountLevel(meViewing.role, meTheme === 'rovers'));
   const x = document.createElement('button'); x.type = 'button'; x.textContent = t('view_exit');
   x.addEventListener('click', () => { setViewAs(null); location.reload(); });
   b.append(txt, x); document.body.prepend(b);
@@ -335,6 +339,7 @@ const MENU_ICONS = {
   home: '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h5v-6h4v6h5V10"/>',
   scouts: '<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M16 5a3.2 3.2 0 0 1 0 6"/><path d="M18 14.3c1.8.7 3 2.4 3 4.7"/>',
   reports: '<rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 4V3h6v1"/><path d="M8.5 10h7M8.5 14h7M8.5 18h4"/>',
+  music: '<path d="M9 18V6l11-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="17.5" cy="16" r="2.5"/>',
   leader: '<path d="M12 3l8 3v6c0 4.5-3.2 8-8 9-4.8-1-8-4.5-8-9V6z"/><path d="M9 12l2 2 4-4"/>',
   depot: '<path d="M3 8l9-5 9 5v9l-9 5-9-5z"/><path d="M3 8l9 5 9-5M12 13v9"/>',
   admin: '<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
@@ -354,7 +359,7 @@ function paintMenu() {
     let sum = d.querySelector('summary'), list = d.querySelector('.menu-list');
     if (!sum) { sum = document.createElement('summary'); list = document.createElement('div'); list.className = 'menu-list'; d.append(sum, list); }
     sum.textContent = t(SITE_PAGES[here][1]);
-    const links = Object.entries(SITE_PAGES).filter(([k]) => k !== here && k !== 'account' && (k !== 'admin' || (signedIn === true && meRole === 'super_admin'))).map(([k, [href, key]]) => menuLink(href, key, k)); // (My account is not a regular entry: it takes the place of Sign in once signed in)
+    const links = Object.entries(SITE_PAGES).filter(([k]) => k !== here && k !== 'account' && (k !== 'leader' || signedIn === true) && (k !== 'admin' || (signedIn === true && meRole === 'super_admin'))).map(([k, [href, key]]) => menuLink(href, key, k)); // (My account is not a regular entry: it takes the place of Sign in once signed in)
     // visitors who aren't signed in get a Sign in option (the sign-in form lives on the leader page, so not shown there)
     if (signedIn === false && here !== 'leader') {
       links.push(menuLink('/leader.html?next=' + encodeURIComponent(location.pathname + location.search), 'sign_in', 'signin', 'signin'));

@@ -63,7 +63,7 @@
         el('p', { class: 'hint' }, t('private_view_hint')),
         rows.length ? el('dl', { class: 'priv-dl' }, rows) : el('p', { class: 'empty' }, t('private_none')),
         p.tags && p.tags.length ? el('div', {}, el('h4', {}, t('tags')), roleChips(p.tags)) : '',
-        !(me && (me.role === 'super_admin' || me.role === 'leader' || me.troop_id === p.troop_id)) ? '' : // editing is only offered where the account may edit
+        !(me && (me.role === 'super_admin' || me.role === 'general_leader' || me.troop_id === p.troop_id)) ? '' : // editing is only offered where the account may edit
         el('a', { class: 'btn ghost small', href: '/leader.html', onclick: () => { try { localStorage.setItem('leaderTroop', String(p.troop_id)); } catch { /* ignore */ } } }, t('private_edit')));
     }
     async function openScout(id) {

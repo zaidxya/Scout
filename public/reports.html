@@ -23,11 +23,7 @@
   </header>
   <main>
     <p id="toast" class="error" role="status"></p>
-    <!-- the reports are public; visitors who are not signed in just don't get the form -->
-    <div id="needSignin" class="panel hidden">
-      <p data-i18n="reports_signin"></p>
-      <a class="btn" href="/leader.html?next=%2Freports.html" data-i18n="sign_in"></a>
-    </div>
+    <!-- everyone reads the weekly reports; the form (writing) is for signed-in accounts -->
     <div id="app">
       <form id="reportForm" class="panel hidden">
         <h2 id="reportFormTitle" data-i18n="report_new"></h2>
@@ -50,15 +46,15 @@
   <script src="/common.js"></script>
   <script>
     const $ = (id) => document.getElementById(id);
-    let me = null, troops = [], reports = [], shown = 6, loaded = false; // shown: how many weeks are listed
+    let me = null, troops = [], reports = [], removed = new Set(), shown = 6, loaded = false; // removed: weeks taken off the page // shown: how many weeks are listed
     const form = $('reportForm');
-    const roams = () => !!me && (me.role === 'super_admin' || me.role === 'leader'); // choose any troop; admins and mods only write their own troop's
-    const canEdit = (troopId) => !!me && (roams() || troopId === me.troop_id);
+    const roams = () => !!me && (me.role === 'super_admin' || me.role === 'general_leader'); // choose any troop; admins and mods only write their own troop's
+    const canEdit = (troopId) => !!me && (roams() || troopId === me.troop_id); // (visitors only read)
     const troopLabel = (x) => (state.lang === 'ar' ? x.name_ar : x.name_en);
     const msg = (text, ok) => { $('toast').textContent = text || ''; $('toast').className = 'error' + (ok ? ' ok' : ''); };
     const ymd = (d) => d.toLocaleDateString('en-CA'); // the local day, YYYY-MM-DD
     // the weekly meeting is on Saturday: this week's (or the last one that has passed), then back in time
-    const recentSaturdays = (n) => { const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 1) % 7)); return Array.from({ length: n }, (_, i) => { const x = new Date(d); x.setDate(d.getDate() - 7 * i); return ymd(x); }); };
+    const recentSaturdays = (n) => { const d = new Date(); d.setHours(12, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 1) % 7)); return Array.from({ length: n }, (_, i) => { const x = new Date(d); x.setDate(d.getDate() - 7 * i); return ymd(x); }).filter((w) => !removed.has(w)); };
     const weekLabel = (w) => t('report_week_label').replace('{date}', fmtDay(w));
     const find = (troopId, week) => reports.find((r) => r.troop_id === troopId && r.week_date === week);
 
@@ -104,30 +100,40 @@
       return el('div', { class: 'post report' + (r ? '' : ' report-none') },
         el('div', { class: 'post-meta' },
           el('span', { class: 'chip tag' }, troopLabel(troop)),
-          r ? el('small', {}, t('report_by').replace('{name}', r.author || '')) : ''),
+          r ? el('small', {}, t('report_by').replace('{name}', withRole(r.author || '', r.author_role, r.author_rovers))) : ''),
         r ? el('p', { class: 'post-body', dir: 'auto' }, r.body) : el('p', { class: 'hint', style: 'margin:0' }, t('report_none')), // plain text: line breaks kept
         canEdit(troop.id) ? el('div', { class: 'row post-actions' }, el('button', { class: 'btn ghost small', type: 'button', onclick: edit }, t(r ? 'edit' : 'report_add'))) : '');
     }
+    // the super admin and general leaders remove a week (it belongs to every troop): the week itself leaves the page, with its reports
+    async function deleteWeek(w) {
+      if (!(await confirmBox(t('confirm_delete_week').replace('{date}', fmtDay(w)), t('report_delete_week')))) return;
+      try { await api('/api/reports/week/' + w, 'DELETE'); msg(''); const f = form.elements; await load(f.week.value, Number(f.troop.value)); } catch (e) { msg(errText(e)); }
+    }
     function drawWeeks() {
-      const weeks = [...new Set([...recentSaturdays(4), ...reports.map((r) => r.week_date)])].sort().reverse();
+      const weeks = [...new Set([...recentSaturdays(4), ...reports.map((r) => r.week_date)])].filter((w) => !removed.has(w)).sort().reverse();
       $('weeks').replaceChildren(...(weeks.length ? weeks.slice(0, shown).map((w) => el('section', { class: 'panel' },
-        el('h3', {}, weekLabel(w)), el('div', { class: 'posts' }, troops.map((tr) => card(tr, w))))) : [el('p', { class: 'empty' }, t(loaded ? 'report_none' : 'loading'))]));
+        el('div', { class: 'row', style: 'align-items:center' }, el('h3', { class: 'grow', style: 'margin:0' }, weekLabel(w)),
+          roams() ? el('button', { class: 'btn quiet small', type: 'button', onclick: () => deleteWeek(w) }, t('report_delete_week')) : ''),
+        el('div', { class: 'posts' }, troops.map((tr) => card(tr, w))))) : [el('p', { class: 'empty' }, t(loaded ? 'report_none' : 'loading'))]));
       $('moreWeeks').classList.toggle('hidden', weeks.length <= shown);
     }
     $('moreWeeks').addEventListener('click', () => { shown += 6; drawWeeks(); });
 
     async function load(week, troop) {
       reports = (await api('/api/reports').catch(() => null)) || reports;
-      loaded = true; if (me) { fillChoices(week, troop); syncForm(); } drawWeeks();
+      removed = new Set((await api('/api/reports/removed-weeks').catch(() => null)) || [...removed]);
+      loaded = true;
+      if (me) { fillChoices(week, troop); syncForm(); } // the form is for signed-in accounts
+      drawWeeks();
     }
     document.addEventListener('langchange', () => { if (me) { fillChoices(form.elements.week.value, Number(form.elements.troop.value)); syncForm(); } drawWeeks(); });
 
     (async () => {
       const troopsReq = api('/api/troops').catch(() => []);
       await initLang();
-      me = await getMe();
+      me = await getMe(); // null for a visitor: the reports can be read, the form stays hidden
+      form.classList.toggle('hidden', !me);
       troops = await troopsReq;
-      if (me) form.classList.remove('hidden'); else $('needSignin').classList.remove('hidden'); // visitors read only; signing in adds the form
       await load();
     })();
   </script>

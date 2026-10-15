@@ -1,0 +1,416 @@
+<!doctype html>
+<html lang="ar" dir="rtl" data-title="music_page">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>كشاف الفوج الثاني</title>
+  <link rel="icon" type="image/png" sizes="192x192" href="/favicon-v2.png">
+  <link rel="apple-touch-icon" href="/favicon-v2.png">
+  <meta name="theme-color" content="#671e93">
+  <script>document.documentElement.classList.add('js')</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <header>
+    <div class="grow"><h1><a class="brand" href="/"><img src="/logo-mark.png" alt=""><span data-i18n="title"></span></a></h1><p data-i18n="music_page"></p></div>
+    <nav>
+      <details class="menu" data-page="music"></details>
+      <button id="langBtn" type="button" class="lang" data-i18n="lang_toggle">العربية</button>
+    </nav>
+  </header>
+  <main>
+    <p id="toast" class="error" role="status"></p>
+    <!-- the team and the instruments depot are public; the Practices tab (attendance) is for signed-in accounts -->
+    <div id="tabs" class="tabs" role="tablist">
+      <button id="btn-team" type="button" role="tab" data-i18n="music_tab_team"></button>
+      <button id="btn-meetings" type="button" role="tab" class="hidden" data-i18n="music_tab_meetings"></button>
+      <button id="btn-depot" type="button" role="tab" data-i18n="music_tab_depot"></button>
+    </div>
+
+    <div id="tab-team" class="cols">
+      <button id="backList" class="btn ghost small back-list" type="button" data-i18n="back_to_list"></button>
+      <section>
+        <!-- managers only: add an existing scout (from any troop) to the team; nobody is created here -->
+        <form id="addForm" class="panel hidden">
+          <h3 data-i18n="music_add_title"></h3>
+          <p class="hint" data-i18n="music_add_hint"></p>
+          <input id="candQ" type="search" data-i18n-ph="music_search_scout" aria-label="Search">
+          <label><span data-i18n="music_scout"></span><select name="scout_id"></select></label>
+          <div class="grid2">
+            <label><span data-i18n="music_group"></span><select name="grp"></select></label>
+            <label><span data-i18n="music_sub"></span><select name="sub"></select></label>
+          </div>
+          <button class="btn" type="submit" data-i18n="add"></button>
+        </form>
+        <input id="search" type="search" data-i18n-ph="search" aria-label="Search">
+        <ul id="list" class="scout-list"></ul>
+      </section>
+      <section id="detail" class="detail"></section>
+    </div>
+
+    <div id="tab-meetings" class="hidden">
+      <div id="mHome">
+        <form id="meetingForm" class="panel hidden">
+          <h2 data-i18n="music_new_meeting"></h2>
+          <p class="hint" data-i18n="music_meeting_hint"></p>
+          <div class="grid2">
+            <label><span data-i18n="att_date"></span><input name="date" type="date" required></label>
+            <label><span data-i18n="att_title"></span><input name="title" type="text" maxlength="80" required></label>
+          </div>
+          <div class="grid2">
+            <label><span data-i18n="att_xp"></span><input name="xp" type="number" min="0" max="1000" step="1" value="10" required></label>
+            <label><span data-i18n="att_absent_xp"></span><input name="absent_xp" type="number" min="0" max="1000" step="1" value="0" required></label>
+          </div>
+          <p class="hint" data-i18n="music_xp_field_hint"></p>
+          <button class="btn" type="submit" data-i18n="add"></button>
+        </form>
+        <div class="panel">
+          <h3 data-i18n="music_meetings"></h3>
+          <div class="filter-row"><input id="meetingQ" type="search" data-i18n-ph="music_search_meetings" aria-label="Search"></div>
+          <ul id="meetingList" class="simple-list"></ul>
+        </div>
+        <div class="panel">
+          <h3 data-i18n="att_summary_title"></h3>
+          <p class="hint" data-i18n="music_summary_hint"></p>
+          <ul id="attSummary" class="simple-list"></ul>
+        </div>
+      </div>
+      <div id="mSheet" class="panel hidden"></div>
+    </div>
+
+    <!-- the instruments inventory: everyone reads and searches it; the managers add, edit and remove -->
+    <div id="tab-depot" class="hidden">
+      <form id="depotForm" class="panel hidden">
+        <h3 data-i18n="music_depot_add"></h3>
+        <div class="grid2">
+          <label><span data-i18n="name_ar"></span><input name="name_ar" type="text" maxlength="80" dir="rtl"></label>
+          <label><span data-i18n="name_en"></span><input name="name_en" type="text" maxlength="80" dir="ltr"></label>
+        </div>
+        <div class="grid2">
+          <label><span data-i18n="music_group"></span><select name="grp"></select></label>
+          <label><span data-i18n="depot_quantity"></span><input name="quantity" type="number" min="0" max="1000000" step="1" required value="1"></label>
+        </div>
+        <label><span data-i18n="depot_notes"></span><input name="notes" type="text" maxlength="500"></label>
+        <button class="btn" type="submit" data-i18n="add"></button>
+      </form>
+      <div class="panel">
+        <h2 data-i18n="music_depot_title"></h2>
+        <p class="hint" data-i18n="music_depot_hint"></p>
+        <input id="depotQ" type="search" data-i18n-ph="depot_search" aria-label="Search">
+        <ul id="depotList" class="depot-list"></ul>
+      </div>
+    </div>
+  </main>
+  <script src="/common.js"></script>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const listEl = $('list'), detailEl = $('detail'), search = $('search');
+    let me = null, troops = [], members = [], current = null, data = null, loading = false;
+    let cand = [], meetings = [], summary = [], meeting = null;
+    // who manages the team: every signed-in account except the helper (members from any troop); the helper only looks
+    const isManager = () => !!me && me.role !== 'helper'; // everyone signed in but the helper edits the team
+    const msg = (text, ok) => { $('toast').textContent = text || ''; $('toast').className = 'error' + (ok ? ' ok' : ''); };
+    const fail = (e) => msg(errText(e));
+    const troopName = (id) => { const x = troops.find((r) => r.id === id); return x ? (state.lang === 'ar' ? x.name_ar : x.name_en) : ''; };
+    const GROUP_IDS = ['brass', 'percussion'], SUB_IDS = [1, 2];
+    const groupName = (id) => t('music_g_' + id);
+    const subName = (n) => t('music_sub_' + n);
+    const teamName = (g, n) => groupName(g) + ' · ' + subName(n); // e.g. فريق نحاسي · فريق أول
+    // the four sub teams, shaped like patrols so the shared scout list draws a heading for each (a member's "group_sub" id plays the part of its patrol id)
+    const groupDefs = () => GROUP_IDS.flatMap((g) => SUB_IDS.map((n) => ({ id: g + '_' + n, name_en: teamName(g, n), name_ar: teamName(g, n) })));
+    const today = () => new Date().toLocaleDateString('en-CA'); // the local day
+
+    // ---------- the team (public): both groups, each member with their troop and the team's XP ----------
+    function drawList() {
+      const q = norm(search.value.trim());
+      const rows = members.filter((s) => !q || [s.name, troopName(s.troop_id), teamName(s.grp, s.sub)].some((v) => norm(v).includes(q))).map((s) => ({ ...s, patrol_id: s.grp + '_' + s.sub }));
+      renderScoutList(listEl, rows, current, openMember, (s) => el('span', { class: 'sub' }, el('span', { class: 'chip tag' }, troopName(s.troop_id))),
+        members.length ? 'no_results' : 'music_empty', groupDefs());
+    }
+    function drawDetail() {
+      detailEl.replaceChildren();
+      if (loading) return detailEl.append(el('p', { class: 'empty' }, t('loading')));
+      if (!data) return detailEl.append(el('p', { class: 'empty' }, t('music_select')));
+      const a = summary.find((x) => x.id === data.id);
+      detailEl.append(
+        renderDetailHead(data, false),
+        el('p', { class: 'hint' }, `${teamName(data.grp, data.sub)} · ${troopName(data.troop_id)}` + (me && a && a.total ? ' · ' + t('music_attended').replace('{n}', fmt(a.attended)).replace('{m}', fmt(a.total)) : '')),
+        ...(isManager() ? [manageCard()] : []),
+        renderLog(data, isManager() ? undoXp : null));
+    }
+    async function loadTeam() { members = await api('/api/music'); drawList(); }
+    async function openMember(id) {
+      current = id;
+      history.replaceState(null, '', '#' + id);
+      drawList();
+      openDetailView($('tab-team')); // phones: the page replaces the list
+      loading = true; data = null; drawDetail();
+      try { const fresh = await api('/api/music/members/' + id); if (current !== id) return; data = fresh; } catch { if (current !== id) return; data = null; }
+      loading = false; drawDetail();
+    }
+    $('backList').addEventListener('click', closeDetailView);
+    search.addEventListener('input', frame(drawList));
+    // reload the list, the open member's page and (signed in) the attendance numbers after a change
+    async function refresh() {
+      await loadTeam();
+      if (me) summary = await api('/api/music/summary').catch(() => summary);
+      if (isManager()) cand = await api('/api/music/candidates').catch(() => cand); // someone taken out of the team can be added again
+      if (current && members.some((s) => s.id === current)) { try { data = await api('/api/music/members/' + current); } catch { data = null; } }
+      else { current = null; data = null; history.replaceState(null, '', location.pathname); }
+      drawList(); drawDetail(); drawAddForm();
+    }
+    async function undoXp(xpId) {
+      if (!(await confirmBox(t('confirm_undo'), t('undo')))) return;
+      try { await api('/api/music/xp/' + xpId, 'DELETE'); msg(''); await refresh(); } catch (e) { fail(e); }
+    }
+    // managers, on a member's page: change their group, take them out of the team, give or deduct the team's XP
+    function manageCard() {
+      const grp = el('select', { 'aria-label': t('music_group') }, GROUP_IDS.map((g) => el('option', { value: g, ...(g === data.grp ? { selected: '' } : {}) }, groupName(g))));
+      const sub = el('select', { 'aria-label': t('music_sub') }, SUB_IDS.map((n) => el('option', { value: String(n), ...(n === data.sub ? { selected: '' } : {}) }, subName(n))));
+      const title = el('input', { name: 'title', type: 'text', maxlength: '80', required: '' }), xp = el('input', { name: 'xp', type: 'number', step: '1', min: '-10000', max: '10000', placeholder: '10', required: '' });
+      const day = el('input', { name: 'date', type: 'date', value: today(), max: today() }), note = el('input', { name: 'note', type: 'text', maxlength: '200' });
+      const award = el('form', { onsubmit: async (ev) => {
+        ev.preventDefault();
+        try { await api(`/api/music/members/${data.id}/xp`, 'POST', { title: title.value, xp: Number(xp.value), date: day.value, note: note.value }); msg(t('saved'), true); await refresh(); } catch (e) { fail(e); }
+      } },
+        el('h4', {}, t('award_xp')),
+        el('label', {}, el('span', {}, t('custom_title')), title),
+        el('label', {}, el('span', {}, t('custom_xp')), xp),
+        el('div', { class: 'grid2' }, el('label', {}, el('span', {}, t('att_date')), day), el('label', {}, el('span', {}, t('note')), note)),
+        el('p', { class: 'hint' }, t('custom_xp_hint')),
+        el('button', { class: 'btn', type: 'submit' }, t('award')));
+      const moveTeam = async () => {
+        try { await api('/api/music/members/' + data.id, 'PUT', { grp: grp.value, sub: Number(sub.value) }); msg(t('saved'), true); await refresh(); } catch (e) { fail(e); }
+      };
+      grp.addEventListener('change', moveTeam); sub.addEventListener('change', moveTeam);
+      return el('div', { class: 'panel' },
+        el('h3', {}, t('music_manage')),
+        el('div', { class: 'grid2' }, el('label', {}, el('span', {}, t('music_group')), grp), el('label', {}, el('span', {}, t('music_sub')), sub)),
+        award,
+        el('div', { class: 'row', style: 'margin-top:.75rem' }, el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
+          if (!(await confirmBox(t('music_confirm_remove'), t('music_remove')))) return;
+          try { await api('/api/music/members/' + data.id, 'DELETE'); msg(''); closeDetailView(); await refresh(); } catch (e) { fail(e); }
+        } }, t('music_remove'))));
+    }
+    // managers: add a scout who already has a profile in a troop (searchable, from every troop)
+    function drawAddForm() {
+      const f = $('addForm');
+      f.classList.toggle('hidden', !isManager());
+      if (!isManager()) return;
+      const q = norm($('candQ').value.trim()), keep = f.elements.scout_id.value, keepG = f.elements.grp.value, keepS = f.elements.sub.value;
+      const rows = cand.filter((s) => !q || norm(s.name).includes(q) || norm(troopName(s.troop_id)).includes(q));
+      f.elements.scout_id.replaceChildren(...(rows.length ? rows.map((s) => el('option', { value: String(s.id) }, `${s.name} · ${troopName(s.troop_id)}`)) : [el('option', { value: '', disabled: '' }, t(cand.length ? 'no_results' : 'music_no_candidates'))]));
+      if (rows.some((s) => String(s.id) === keep)) f.elements.scout_id.value = keep;
+      f.elements.grp.replaceChildren(...GROUP_IDS.map((g) => el('option', { value: g }, groupName(g))));
+      if (keepG) f.elements.grp.value = keepG;
+      f.elements.sub.replaceChildren(...SUB_IDS.map((n) => el('option', { value: String(n) }, subName(n))));
+      if (keepS) f.elements.sub.value = keepS;
+    }
+    async function loadCandidates() { cand = await api('/api/music/candidates').catch(() => []); drawAddForm(); }
+    $('candQ').addEventListener('input', frame(drawAddForm));
+    $('addForm').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const f = ev.target.elements;
+      if (!f.scout_id.value) return;
+      try { await api('/api/music/members', 'POST', { scout_id: Number(f.scout_id.value), grp: f.grp.value, sub: Number(f.sub.value) }); msg(t('saved'), true); $('candQ').value = ''; await refresh(); } catch (e) { fail(e); }
+    });
+
+    // ---------- weekly practices (تدريبات) and attendance (signed in) ----------
+    const meetingLabel = (m) => fmtDay(m.meeting_date) + (m.title ? ' · ' + m.title : '');
+    const countText = (n, of) => t('att_count').replace('{n}', fmt(n)).replace('{m}', fmt(of));
+    async function openMeetings(id) {
+      try {
+        meeting = null;
+        const f = $('meetingForm').elements; if (!f.date.value) f.date.value = today(); f.date.max = today(); if (!f.title.value) f.title.value = t('music_default_title');
+        $('meetingForm').classList.toggle('hidden', !isManager());
+        [meetings, summary] = await Promise.all([api('/api/music/meetings'), api('/api/music/summary')]);
+        if (id) meeting = await api('/api/music/meetings/' + id);
+      } catch (e) { fail(e); }
+      drawMeetings();
+    }
+    function drawMeetings() {
+      $('mHome').classList.toggle('hidden', !!meeting);
+      $('mSheet').classList.toggle('hidden', !meeting);
+      if (meeting) return drawSheet();
+      const q = norm($('meetingQ').value.trim());
+      const shown = meetings.filter((m) => !q || [m.title, m.meeting_date, fmtDay(m.meeting_date)].some((v) => norm(v).includes(q)));
+      $('meetingList').replaceChildren(...(shown.length ? shown.map((m) => el('li', {},
+        el('button', { class: 'btn quiet-link grow', type: 'button', style: 'text-align:start;background:none;border:0;color:inherit;font:inherit;cursor:pointer;padding:0', onclick: () => openMeetings(m.id) }, el('b', {}, meetingLabel(m))),
+        el('small', {}, countText(m.present, members.length)))) : [el('li', { class: 'empty' }, t(meetings.length ? 'no_results' : 'music_no_meetings'))]));
+      const rows = members.map((s) => ({ s, a: summary.find((x) => x.id === s.id) || { attended: 0, total: 0 } }))
+        .sort((x, y) => (y.a.total ? y.a.attended / y.a.total : 0) - (x.a.total ? x.a.attended / x.a.total : 0) || x.s.name.localeCompare(y.s.name, state.lang));
+      $('attSummary').replaceChildren(...(meetings.length && rows.length ? rows.map(({ s, a }) => el('li', {},
+        el('span', { class: 'grow', dir: 'auto' }, s.name), el('small', {}, teamName(s.grp, s.sub)),
+        el('small', {}, countText(a.attended, a.total)),
+        el('b', {}, a.total ? fmt(Math.round(100 * a.attended / a.total)) + '%' : '—'))) : [el('li', { class: 'empty' }, t('music_no_meetings'))]));
+    }
+    $('meetingQ').addEventListener('input', frame(() => drawMeetings()));
+    function drawSheet() {
+      const m = meeting, box = $('mSheet'), can = isManager();
+      const present = new Set(m.present_ids), absent = new Set(m.absent_ids || []), excused = new Set(m.excused_ids || []); // absent = no excuse
+      const counter = el('b', {});
+      const refreshCount = () => {
+        const nP = members.filter((s) => present.has(s.id)).length, nA = members.filter((s) => absent.has(s.id)).length, nE = members.filter((s) => excused.has(s.id)).length;
+        counter.textContent = countText(nP, members.length) + (nA ? ' · ' + t('att_absent_count').replace('{n}', fmt(nA)) : '') + (nE ? ' · ' + t('att_excused_count').replace('{n}', fmt(nE)) : '');
+      };
+      const dateIn = el('input', { type: 'date', value: m.meeting_date, required: '', max: today(), 'aria-label': t('att_date') });
+      const titleIn = el('input', { type: 'text', maxlength: '80', value: m.title || '', required: '', 'aria-label': t('att_title'), placeholder: t('att_title') });
+      const xpField = (value, key) => el('input', { type: 'number', min: '0', max: '1000', step: '1', value: String(value), required: '', 'aria-label': t(key) });
+      const xpIn = xpField(m.xp, 'att_xp'), absentXpIn = xpField(m.absent_xp || 0, 'att_absent_xp');
+      const buttons = new Map(); // member id -> repaint function of its buttons
+      const sync = () => buttons.forEach((paint) => paint());
+      const save = () => { m.present_ids = [...present]; m.absent_ids = [...absent]; m.excused_ids = [...excused]; sync(); refreshCount(); loadTeam().catch(() => {}); }; // the XP totals changed
+      const xpWorth = (st) => (st === 'present' ? m.xp : st === 'absent' ? -(m.absent_xp || 0) : 0); // an excused absence is worth nothing
+      const stateOf = (id) => (present.has(id) ? 'present' : absent.has(id) ? 'absent' : excused.has(id) ? 'excused' : 'none');
+      const setAll = async (status) => {
+        try { await api(`/api/music/meetings/${m.id}/attendance`, 'PUT', { status }); } catch (e) { return fail(e); }
+        members.forEach((s) => {
+          if (status === 'none') { present.delete(s.id); absent.delete(s.id); excused.delete(s.id); }
+          else if (status === 'present') { present.add(s.id); absent.delete(s.id); excused.delete(s.id); }
+          else if (!present.has(s.id) && !excused.has(s.id)) absent.add(s.id); // the rest: absent without an excuse (excused ones stay)
+        });
+        save(); msg(t('saved'), true);
+      };
+      // three buttons per member: Present, Absent (no excuse), Excused; pressing the one that is on clears the mark
+      const row = (s) => {
+        const pb = el('button', { type: 'button', class: 'btn small att-btn' }), ab = el('button', { type: 'button', class: 'btn small att-btn att-absent' }), eb = el('button', { type: 'button', class: 'btn small att-btn att-excused' });
+        const paint = () => {
+          const st = stateOf(s.id);
+          pb.textContent = st === 'present' ? '✓ ' + t('att_present') : t('att_mark'); pb.classList.toggle('ghost', st !== 'present'); pb.setAttribute('aria-pressed', String(st === 'present'));
+          ab.textContent = st === 'absent' ? '✓ ' + t('att_absent') : t('att_mark_absent'); ab.classList.toggle('ghost', st !== 'absent'); ab.setAttribute('aria-pressed', String(st === 'absent'));
+          eb.textContent = st === 'excused' ? '✓ ' + t('att_excused') : t('att_mark_excused'); eb.classList.toggle('ghost', st !== 'excused'); eb.setAttribute('aria-pressed', String(st === 'excused'));
+        };
+        paint(); buttons.set(s.id, paint);
+        if (!can) pb.disabled = ab.disabled = eb.disabled = true; // the helper only looks
+        const press = (want) => async () => {
+          const before = stateOf(s.id), status = before === want ? 'none' : want;
+          pb.disabled = ab.disabled = eb.disabled = true;
+          try { await api(`/api/music/meetings/${m.id}/attendance/${s.id}`, 'PUT', { status }); } catch (e) { pb.disabled = ab.disabled = eb.disabled = false; return fail(e); }
+          pb.disabled = ab.disabled = eb.disabled = !can;
+          present.delete(s.id); absent.delete(s.id); excused.delete(s.id); if (status === 'present') present.add(s.id); if (status === 'absent') absent.add(s.id); if (status === 'excused') excused.add(s.id);
+          const delta = xpWorth(status) - xpWorth(before);
+          save(); msg(delta ? t('att_xp_change').replace('{xp}', signed(delta)) : t('saved'), true);
+        };
+        pb.addEventListener('click', press('present')); ab.addEventListener('click', press('absent')); eb.addEventListener('click', press('excused'));
+        return el('li', {}, el('span', { class: 'grow', dir: 'auto' }, s.name, ' ', el('small', {}, troopName(s.troop_id))), el('span', { class: 'att-btns' }, pb, ab, eb));
+      };
+      refreshCount();
+      box.replaceChildren(
+        el('div', { class: 'row' }, el('button', { class: 'btn small', type: 'button', onclick: () => openMeetings() }, t('music_back_meetings')), el('span', { class: 'grow' }), counter),
+        el('h2', {}, meetingLabel(m)),
+        el('p', { class: 'hint' }, m.xp ? t('music_xp_hint').replace('{xp}', fmt(m.xp)) : t('music_xp_none')),
+        m.absent_xp ? el('p', { class: 'hint' }, t('att_absent_hint').replace('{xp}', fmt(m.absent_xp))) : '',
+        ...(!can ? [] : [
+          el('div', { class: 'grid2' }, el('label', {}, el('span', {}, t('att_date')), dateIn), el('label', {}, el('span', {}, t('att_title')), titleIn)),
+          el('div', { class: 'grid2' }, el('label', {}, el('span', {}, t('att_xp')), xpIn), el('label', {}, el('span', {}, t('att_absent_xp')), absentXpIn)),
+          el('div', { class: 'row' },
+            el('button', { class: 'btn small', type: 'button', onclick: async () => {
+              if (![titleIn, xpIn, absentXpIn, dateIn].every((i) => i.reportValidity())) return;
+              try {
+                await api('/api/music/meetings/' + m.id, 'PUT', { date: dateIn.value, title: titleIn.value, xp: xpIn.value, absent_xp: absentXpIn.value });
+                m.meeting_date = dateIn.value; m.title = titleIn.value.trim(); m.xp = Number(xpIn.value); m.absent_xp = Number(absentXpIn.value);
+                loadTeam().catch(() => {}); msg(t('saved'), true); drawSheet();
+              } catch (e) { fail(e); }
+            } }, t('save')),
+            el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
+              if (!(await confirmBox(t('music_confirm_delete_meeting')))) return;
+              try { await api('/api/music/meetings/' + m.id, 'DELETE'); msg(''); await loadTeam(); await openMeetings(); } catch (e) { fail(e); }
+            } }, t('delete'))),
+          el('div', { class: 'row', style: 'margin:.75rem 0' },
+            el('button', { class: 'btn small', type: 'button', onclick: () => setAll('present') }, t('att_all')),
+            el('button', { class: 'btn ghost small', type: 'button', onclick: () => setAll('absent') }, t('att_rest_absent')),
+            el('button', { class: 'btn quiet small', type: 'button', onclick: () => setAll('none') }, t('att_clear')))]),
+        ...(members.length ? GROUP_IDS.flatMap((g) => SUB_IDS.flatMap((n) => { const list = members.filter((s) => s.grp === g && s.sub === n); return list.length ? [el('h3', {}, teamName(g, n)), el('ul', { class: 'simple-list' }, list.map(row))] : []; })) : [el('p', { class: 'empty' }, t('music_empty'))]));
+    }
+    $('meetingForm').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const f = new FormData(ev.target);
+      try { const m = await api('/api/music/meetings', 'POST', { date: f.get('date'), title: f.get('title'), xp: f.get('xp'), absent_xp: f.get('absent_xp') }); ev.target.elements.title.value = t('music_default_title'); msg(''); await openMeetings(m.id); }
+      catch (e) { fail(e); }
+    });
+
+    // ---------- the instruments depot: everyone reads it, the managers add, edit and remove ----------
+    let depot = [], editingItem = null;
+    const itemName = (i) => (state.lang === 'ar' ? i.name_ar : i.name_en);
+    const grpLabel = (g) => (g ? groupName(g) : t('music_depot_both'));
+    const grpOptions = (cur) => ['', ...GROUP_IDS].map((g) => el('option', { value: g, ...(g === (cur || '') ? { selected: '' } : {}) }, grpLabel(g)));
+    async function loadDepot() { try { depot = await api('/api/music/depot'); } catch (e) { fail(e); } drawDepot(); }
+    function drawDepot() {
+      const form = $('depotForm'), keep = form.elements.grp.value;
+      form.classList.toggle('hidden', !isManager());
+      form.elements.grp.replaceChildren(...grpOptions(keep));
+      const q = norm($('depotQ').value.trim());
+      const shown = depot.filter((i) => !q || [i.name_ar, i.name_en, i.notes || '', grpLabel(i.grp)].some((v) => norm(v).includes(q)));
+      $('depotList').replaceChildren(...(shown.length ? shown.map(itemRow) : [el('li', { class: 'empty' }, t(depot.length ? 'no_results' : 'music_depot_empty'))]));
+    }
+    // an instrument as everyone sees it: name, its group and notes, then the quantity in its own box (red "out of stock" at 0)
+    function itemRow(i) {
+      if (isManager() && editingItem === i.id) return itemEdit(i);
+      const out = i.quantity === 0;
+      return el('li', { class: 'depot-item' + (out ? ' out' : '') },
+        el('div', { class: 'grow' }, el('b', { dir: 'auto' }, itemName(i)), ' ', el('span', { class: 'chip tag' }, grpLabel(i.grp)), i.notes ? el('small', { class: 'depot-notes', dir: 'auto' }, i.notes) : ''),
+        el('div', { class: 'depot-qty' }, el('small', {}, t(out ? 'depot_out' : 'depot_quantity')), el('b', {}, fmt(i.quantity))),
+        isManager() ? el('div', { class: 'depot-btns' }, el('button', { class: 'btn ghost small', type: 'button', 'aria-label': t('edit') + ': ' + itemName(i), onclick: () => { editingItem = i.id; drawDepot(); } }, t('edit'))) : '');
+    }
+    function itemEdit(i) {
+      const ar = el('input', { type: 'text', maxlength: '80', dir: 'rtl', value: i.name_ar, 'aria-label': t('name_ar') }), en = el('input', { type: 'text', maxlength: '80', dir: 'ltr', value: i.name_en, 'aria-label': t('name_en') });
+      const grp = el('select', { 'aria-label': t('music_group') }, grpOptions(i.grp));
+      const qty = el('input', { type: 'number', min: '0', max: '1000000', step: '1', required: '', value: String(i.quantity), 'aria-label': t('depot_quantity') });
+      const notes = el('input', { type: 'text', maxlength: '500', value: i.notes || '', 'aria-label': t('depot_notes'), placeholder: t('depot_notes') });
+      const form = el('form', { class: 'panel', onsubmit: async (ev) => {
+        ev.preventDefault();
+        try { await api('/api/music/depot/' + i.id, 'PUT', { name_ar: ar.value, name_en: en.value, grp: grp.value, quantity: Number(qty.value), notes: notes.value }); editingItem = null; msg(t('saved'), true); await loadDepot(); } catch (e) { fail(e); }
+      } },
+        el('div', { class: 'grid2' }, el('label', {}, el('span', {}, t('name_ar')), ar), el('label', {}, el('span', {}, t('name_en')), en)),
+        el('div', { class: 'grid2' }, el('label', {}, el('span', {}, t('music_group')), grp), el('label', {}, el('span', {}, t('depot_quantity')), qty)),
+        el('label', {}, el('span', {}, t('depot_notes')), notes),
+        el('div', { class: 'row' },
+          el('button', { class: 'btn small', type: 'submit' }, t('save')),
+          el('button', { class: 'btn ghost small', type: 'button', onclick: () => { editingItem = null; drawDepot(); } }, t('cancel')),
+          el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
+            if (!(await confirmBox(t('music_depot_confirm_delete')))) return;
+            try { await api('/api/music/depot/' + i.id, 'DELETE'); editingItem = null; msg(''); await loadDepot(); } catch (e) { fail(e); }
+          } }, t('delete'))));
+      return el('li', {}, form);
+    }
+    $('depotQ').addEventListener('input', frame(drawDepot));
+    $('depotForm').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      const f = ev.target.elements;
+      if (!f.name_ar.value.trim() && !f.name_en.value.trim()) return msg(t('err_invalid_input'));
+      try {
+        await api('/api/music/depot', 'POST', { name_ar: f.name_ar.value, name_en: f.name_en.value, grp: f.grp.value, quantity: Number(f.quantity.value), notes: f.notes.value });
+        ev.target.reset(); msg(t('saved'), true); await loadDepot();
+      } catch (e) { fail(e); }
+    });
+
+    // ---------- tabs ----------
+    function showTab(n) {
+      if (n === 'meetings' && !me) n = 'team';
+      msg('');
+      ['team', 'meetings', 'depot'].forEach((x) => { $('tab-' + x).classList.toggle('hidden', x !== n); $('btn-' + x).setAttribute('aria-selected', String(x === n)); });
+      if (n === 'meetings') openMeetings();
+      if (n === 'depot') loadDepot();
+    }
+    $('btn-team').addEventListener('click', () => showTab('team')); $('btn-meetings').addEventListener('click', () => showTab('meetings')); $('btn-depot').addEventListener('click', () => showTab('depot'));
+    document.addEventListener('langchange', () => { drawList(); drawDetail(); drawAddForm(); if (!$('tab-meetings').classList.contains('hidden')) drawMeetings(); drawDepot(); });
+
+    (async () => {
+      const troopsReq = api('/api/troops').catch(() => []), teamReq = api('/api/music').catch(() => []);
+      await initLang();
+      me = await getMe();
+      troops = await troopsReq; members = await teamReq;
+      $('btn-meetings').classList.toggle('hidden', !me); // visitors see the team and the depot, not the attendance
+      showTab('team');
+      drawList(); drawDetail();
+      if (me) { summary = await api('/api/music/summary').catch(() => []); }
+      if (isManager()) await loadCandidates();
+      const id = parseInt(location.hash.slice(1), 10);
+      if (id) openMember(id);
+    })();
+  </script>
+</body>
+</html>

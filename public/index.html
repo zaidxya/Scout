@@ -32,6 +32,7 @@
       <a class="quick-card" href="/scouts.html"><b data-i18n="scout_list"></b><small data-i18n="home_scouts_hint"></small></a>
       <a class="quick-card" href="/depot.html"><b data-i18n="depot"></b><small data-i18n="home_depot_hint"></small></a>
       <a class="quick-card" href="/reports.html"><b data-i18n="reports_page"></b><small data-i18n="home_reports_hint"></small></a>
+      <a class="quick-card" href="/music.html"><b data-i18n="music_page"></b><small data-i18n="home_music_hint"></small></a>
     </nav>
     <!-- writing posts (admins, leaders and the super admin): the button opens the form -->
     <div id="postTools" class="home-bar hidden">
@@ -72,8 +73,8 @@
     const isUpcoming = (p) => p.kind !== 'news' && p.event_date && p.event_date >= today(); // activities and events from today on
     const troopLabel = (x) => (state.lang === 'ar' ? x.name_ar : x.name_en);
     // who writes: admins, leaders and the super admin. The super admin and leaders pick any troops (or all); an admin's posts always include its own troop
-    const isPoster = () => !!me && ['super_admin', 'admin', 'leader'].includes(me.role);
-    const roams = () => !!me && (me.role === 'super_admin' || me.role === 'leader');
+    const isPoster = () => !!me && ['super_admin', 'general_leader', 'admin', 'mod', 'leader'].includes(me.role);
+    const roams = () => !!me && (me.role === 'super_admin' || me.role === 'general_leader');
     const canEdit = (p) => isPoster() && (roams() || p.troop_ids.includes(me.troop_id)); // an admin: the posts its own troop is part of
     const msg = (text, ok) => { $('toast').textContent = text || ''; $('toast').className = 'error' + (ok ? ' ok' : ''); };
 

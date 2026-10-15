@@ -143,9 +143,10 @@ CREATE INDEX IF NOT EXISTS scouts_patrol_idx ON scouts(patrol_id);
 CREATE INDEX IF NOT EXISTS activities_troop_idx ON activities(troop_id);
 CREATE INDEX IF NOT EXISTS labels_troop_idx ON labels(troop_id);
 
--- account level "mod" (رائد): sees only the members of its own patrol and their activity
+-- account level "general_leader" (القائد العام): the leader's permissions in every troop (it can switch troops)
+-- account levels "mod" (مساعد القائد) and "helper" (عريف, رائد in a Rovers troop; same permissions as the mod, except in the musical team): see only the members of their own patrol and their activity
 ALTER TABLE leaders DROP CONSTRAINT IF EXISTS leaders_role_check;
-ALTER TABLE leaders ADD CONSTRAINT leaders_role_check CHECK (role IN ('super_admin', 'admin', 'leader', 'mod'));
+ALTER TABLE leaders ADD CONSTRAINT leaders_role_check CHECK (role IN ('super_admin', 'admin', 'leader', 'mod', 'helper', 'general_leader'));
 
 -- scouts are never deleted: leaving the movement deactivates them (hidden from the public dashboard and the default lists, history kept)
 ALTER TABLE scouts ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT true;
@@ -269,6 +270,12 @@ CREATE TABLE IF NOT EXISTS posts (
 CREATE INDEX IF NOT EXISTS posts_troop_idx ON posts(troop_id, created_at DESC);
 
 -- weekly reports: what a troop did at its weekly meeting (Saturday). One per troop and week; week_date is the Saturday.
+-- a week taken off the weekly reports page altogether (not just emptied): the week itself is removed from the list and from the form's choices
+CREATE TABLE IF NOT EXISTS report_weeks_removed (
+  week_date DATE PRIMARY KEY,
+  removed_by INT REFERENCES leaders(id) ON DELETE SET NULL,
+  removed_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 CREATE TABLE IF NOT EXISTS weekly_reports (
   id SERIAL PRIMARY KEY,
   troop_id INT NOT NULL REFERENCES troops(id) ON DELETE CASCADE,
@@ -294,3 +301,60 @@ UPDATE posts SET troop_id = NULL WHERE troop_id IS NOT NULL;
 -- a troop's slogan ("Always Prepared"), shown next to the troop's name in the leader area
 ALTER TABLE troops ADD COLUMN IF NOT EXISTS slogan_en TEXT;
 ALTER TABLE troops ADD COLUMN IF NOT EXISTS slogan_ar TEXT;
+
+-- the musical team (الفريق الموسيقي): one team for the whole site, made of existing scouts (a member must have a scout profile in a troop) in two groups,
+-- brass (نحاسي) and percussion (إيقاع). It has its own weekly meetings with attendance and its own XP, separate from every troop's XP (xp_log is not used).
+CREATE TABLE IF NOT EXISTS music_members (
+  scout_id INT PRIMARY KEY REFERENCES scouts(id) ON DELETE CASCADE,
+  grp TEXT NOT NULL CHECK (grp IN ('brass', 'percussion')),
+  added_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  added_by INT REFERENCES leaders(id) ON DELETE SET NULL
+);
+CREATE TABLE IF NOT EXISTS music_meetings (
+  id SERIAL PRIMARY KEY,
+  meeting_date DATE NOT NULL,
+  title TEXT NOT NULL,
+  xp INT NOT NULL DEFAULT 10 CHECK (xp BETWEEN 0 AND 1000),
+  absent_xp INT NOT NULL DEFAULT 0 CHECK (absent_xp BETWEEN 0 AND 1000),
+  created_by INT REFERENCES leaders(id) ON DELETE SET NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS music_meetings_date_idx ON music_meetings(meeting_date DESC);
+-- a row = that member's mark for the meeting (no row = no mark)
+CREATE TABLE IF NOT EXISTS music_attendance (
+  meeting_id INT NOT NULL REFERENCES music_meetings(id) ON DELETE CASCADE,
+  scout_id INT NOT NULL REFERENCES scouts(id) ON DELETE CASCADE,
+  status TEXT NOT NULL CHECK (status IN ('present', 'absent', 'excused')),
+  PRIMARY KEY (meeting_id, scout_id)
+);
+CREATE INDEX IF NOT EXISTS music_attendance_scout_idx ON music_attendance(scout_id);
+-- the team's own XP history (same shape as xp_log); the entries made by attendance are linked to their meeting, one per member and meeting
+CREATE TABLE IF NOT EXISTS music_xp_log (
+  id SERIAL PRIMARY KEY,
+  scout_id INT NOT NULL REFERENCES scouts(id) ON DELETE CASCADE,
+  activity TEXT NOT NULL,
+  activity_ar TEXT,
+  xp INT NOT NULL,
+  note TEXT,
+  leader_id INT REFERENCES leaders(id) ON DELETE SET NULL,
+  activity_date DATE,
+  meeting_id INT REFERENCES music_meetings(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS music_xp_log_scout_idx ON music_xp_log(scout_id);
+CREATE UNIQUE INDEX IF NOT EXISTS music_xp_log_meeting_scout_idx ON music_xp_log(meeting_id, scout_id) WHERE meeting_id IS NOT NULL;
+-- each group is split into two sub teams: فريق أول (1) and فريق ثاني (2)
+ALTER TABLE music_members ADD COLUMN IF NOT EXISTS sub INT NOT NULL DEFAULT 1;
+ALTER TABLE music_members DROP CONSTRAINT IF EXISTS music_members_sub_check;
+ALTER TABLE music_members ADD CONSTRAINT music_members_sub_check CHECK (sub IN (1, 2));
+-- the musical team's own depot (instruments): same shape as depot_items, plus the group an instrument belongs to (NULL: both). Separate from the troops' depot.
+CREATE TABLE IF NOT EXISTS music_depot_items (
+  id SERIAL PRIMARY KEY,
+  name_en TEXT NOT NULL,
+  name_ar TEXT NOT NULL,
+  grp TEXT CHECK (grp IN ('brass', 'percussion')),
+  quantity INT NOT NULL DEFAULT 0 CHECK (quantity >= 0),
+  notes TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);

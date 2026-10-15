@@ -88,6 +88,7 @@ const sloganOf = (b) => [text(b?.slogan_en, 60), text(b?.slogan_ar, 60)]; // the
 const themeOf = (b) => { const k = b?.theme ?? 'default'; if (!THEME_KEYS.includes(k)) throw invalid(); return k; };
 
 // ---- auth ----
+const ACCOUNT_ROLES = ['admin', 'leader', 'mod', 'helper', 'general_leader']; // the levels the super admin can give
 const requireLeader = wrap(async (req, res, next) => {
   let p;
   try { p = jwt.verify(req.cookies.token, SECRET); } catch { return bad(res, 'unauthorized', 401); }
@@ -113,24 +114,29 @@ const requireLeader = wrap(async (req, res, next) => {
     const all = await troopList();
     req.troop = (all.find((x) => x.id === parseInt(req.get('x-troop'), 10)) || all.find((x) => x.id === req.leader.troop_id) || all[0]).id;
   }
-  // a mod (رائد) only works with the patrol it is in charge of: the patrol set on its own scout profile (null: none assigned yet)
+  // a mod (مساعد القائد) or helper (عريف / رائد) only works with the patrol it is in charge of: the patrol set on its own scout profile (null: none assigned yet)
   req.patrol = null;
-  if (req.leader.role === 'mod' && req.leader.scout_id) req.patrol = (await pool.query('SELECT patrol_id FROM scouts WHERE id = $1', [req.leader.scout_id])).rows[0]?.patrol_id ?? null;
+  if (isHelper(req.leader) && req.leader.scout_id) req.patrol = (await pool.query('SELECT patrol_id FROM scouts WHERE id = $1', [req.leader.scout_id])).rows[0]?.patrol_id ?? null;
   next();
 });
 // account levels: super_admin (everything), admin (their own troop, incl. roles/tags), leader (like an admin but can switch troops, and has no roles/tags),
 // mod (members and their activity only). Only the super admin manages troops and accounts and sees the activity log.
 // the super admin and leaders work in any troop they switch to; admins and mods only in their own
-const roams = (l) => l.role === 'super_admin' || l.role === 'leader';
+// the helper (عريف, called رائد in a Rovers troop) works with the members of its own patrol only (the old mod's limits); it can't edit the musical team (see requireMusicManager)
+const isHelper = (l) => l.role === 'helper';
+// the deputy leader (نائب القائد, admin), the assistant leader (مساعد القائد, mod) and the leader (القائد) are one level under three names: they work in their own troop only
+// (no Activities, no Roles & tags). The general leader (القائد العام) has the same permissions but works in every troop, like the super admin.
+const isTroopStaff = (l) => l.role === 'admin' || l.role === 'mod' || l.role === 'leader';
+const roams = (l) => l.role === 'super_admin' || l.role === 'general_leader';
 // may edit the depot items and cancel their troop's reservations
-const isAdmin = (l) => l.role === 'super_admin' || l.role === 'admin' || l.role === 'leader';
+const isAdmin = (l) => l.role === 'super_admin' || l.role === 'general_leader' || isTroopStaff(l);
 // a mod (رائد) works with the members of its own patrol and their activity (and adds meetings of that patrol): the rest of the troop's setup (activities, roles/tags, the patrols themselves) is closed to it
-const requireNotMod = (req, res, next) => (req.leader.role === 'mod' ? bad(res, 'forbidden', 403) : next());
+const requireNotMod = (req, res, next) => (isHelper(req.leader) ? bad(res, 'forbidden', 403) : next());
 const requireAdmin = (req, res, next) => (isAdmin(req.leader) ? next() : bad(res, 'forbidden', 403));
 // activities (the troop's list of awards): admins and the super admin (not mods, not leaders)
-const requireActivityEditor = (req, res, next) => (req.leader.role === 'super_admin' || req.leader.role === 'admin' ? next() : bad(res, 'forbidden', 403));
+const requireActivityEditor = (req, res, next) => (req.leader.role === 'super_admin' ? next() : bad(res, 'forbidden', 403));
 // roles and tags: admins and the super admin (not mods, not leaders)
-const requireLabelEditor = (req, res, next) => (req.leader.role === 'super_admin' || req.leader.role === 'admin' ? next() : bad(res, 'forbidden', 403));
+const requireLabelEditor = (req, res, next) => (req.leader.role === 'super_admin' ? next() : bad(res, 'forbidden', 403));
 // the super admin alone: the troops, the accounts and the activity log
 const isSuper = (l) => l.role === 'super_admin';
 const requireSuper = (req, res, next) => (isSuper(req.leader) ? next() : bad(res, 'forbidden', 403));
@@ -140,6 +146,9 @@ const troopScope = (l) => (roams(l) ? null : l.troop_id);
 const canManage = (req, target) => target.id !== req.leader.id && target.role !== 'super_admin';
 
 // ---- audit log: who did what (never stores passwords or private scout details) ----
+// SQL for the level of the account `idExpr` points at, as <p>_role and <p>_rovers (its troop has the Rovers theme); null when the account is gone
+const whoSql = (idExpr, p) => `(SELECT x.role FROM leaders x WHERE x.id = ${idExpr}) AS ${p}_role,
+  COALESCE((SELECT tr.theme = 'rovers' FROM leaders x JOIN troops tr ON tr.id = x.troop_id WHERE x.id = ${idExpr}), false) AS ${p}_rovers`;
 function audit(leader, action, meta, troopId) {
   pool.query('INSERT INTO audit_log (leader_id, leader_name, action, meta, troop_id) VALUES ($1,$2,$3,$4,$5)',
     [leader.id, leader.username, action, meta ? JSON.stringify(meta) : null, troopId ?? leader.troop_id ?? null])
@@ -148,7 +157,7 @@ function audit(leader, action, meta, troopId) {
 // a mod (رائد) can see everyone like any other account, but only CHANGE the scouts of its own patrol (its own profile is in it). A mod with no patrol changes nobody.
 // editableSql is SQL for "this scout may be changed by this account" on the scouts table aliased `a` (always true for everyone else), patrolSql the same
 // as a condition to append to a WHERE; only whole numbers read from the database are put in, never request data
-const modOnly = (req) => req.leader.role === 'mod';
+const modOnly = (req) => isHelper(req.leader);
 const editableSql = (req, a) => (modOnly(req) ? (req.patrol ? `${a}.patrol_id = ${Number(req.patrol)}` : 'false') : 'true');
 const patrolSql = (req, a) => (modOnly(req) ? ` AND ${editableSql(req, a)}` : '');
 const inPatrol = (req, s) => !modOnly(req) || (req.patrol != null && s.patrol_id === req.patrol);
@@ -221,9 +230,9 @@ app.get('/api/me', requireLeader, wrap(async (req, res) => {
 app.get('/api/view-as/accounts', requireLeader, wrap(async (req, res) => {
   if (req.real.role !== 'super_admin') return bad(res, 'forbidden', 403);
   res.json((await pool.query(
-    `SELECT l.id, l.username, l.role, l.troop_id, s.name AS display_name, t.name_en AS troop_name_en, t.name_ar AS troop_name_ar
+    `SELECT l.id, l.username, l.role, l.troop_id, (t.theme = 'rovers') AS rovers, s.name AS display_name, t.name_en AS troop_name_en, t.name_ar AS troop_name_ar
      FROM leaders l LEFT JOIN scouts s ON s.id = l.scout_id LEFT JOIN troops t ON t.id = l.troop_id
-     WHERE l.role <> 'super_admin' ORDER BY l.troop_id, (l.role = 'admin') DESC, (l.role = 'leader') DESC, l.username`)).rows);
+     WHERE l.role <> 'super_admin' ORDER BY l.troop_id, (l.role = 'general_leader') DESC, (l.role = 'admin') DESC, (l.role = 'mod') DESC, (l.role = 'leader') DESC, l.username`)).rows);
 }));
 
 // own account: change the username and/or the password (the current password is always required; a new password must be typed twice)
@@ -519,6 +528,35 @@ app.post('/api/scouts', requireLeader, wrap(async (req, res) => {
   res.status(201).json(rows[0]);
 }));
 
+// many scouts at once (the import in the Add scout tab): each row is checked exactly like a single new scout; the valid ones are added together in
+// one transaction to the troop being worked on, the numbers (1-based) of the refused rows come back. At most 200 at a time.
+app.post('/api/scouts/bulk', requireLeader, wrap(async (req, res) => {
+  const list = req.body?.scouts;
+  if (!Array.isArray(list) || !list.length || list.length > 200) throw invalid();
+  const troop = req.troop;
+  if (modOnly(req) && !req.patrol) return bad(res, 'no_patrol', 403);
+  const good = [], failed = [];
+  list.forEach((b, i) => {
+    try {
+      const name = text(b?.name, 60);
+      if (!name) throw invalid();
+      good.push([name, troop, text(b.full_name, 120), phone(b.phone), date(b.join_date), text(b.address, 300), date(b.birth_date),
+        text(b.guardian_name, 120), phone(b.guardian_phone), text(b.medical_notes, 1000), text(b.notes, 1000), modOnly(req) ? req.patrol : null]);
+    } catch { failed.push(i + 1); }
+  });
+  if (good.length) {
+    await tx(async (c) => {
+      for (const v of good) {
+        await c.query(
+          `INSERT INTO scouts (name, troop_id, full_name, phone, join_date, address, birth_date, guardian_name, guardian_phone, medical_notes, notes, patrol_id)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, v);
+      }
+    });
+    audit(req.leader, 'scout_import', { name: String(good.length) }, troop);
+  }
+  res.status(201).json({ created: good.length, failed });
+}));
+
 app.put('/api/scouts/:id', requireLeader, wrap(async (req, res) => {
   const id = intId(req.params.id);
   const b = req.body || {};
@@ -676,9 +714,9 @@ app.delete('/api/activities/:id', requireLeader, requireActivityEditor, wrap(asy
 // every account of every troop (the Administration page groups them by troop)
 app.get('/api/leaders', requireLeader, requireSuper, wrap(async (req, res) => {
   const { rows } = await pool.query(
-    `SELECT l.id, l.username, l.role, l.created_at, l.scout_id, l.troop_id, s.name AS scout_name
-     FROM leaders l LEFT JOIN scouts s ON s.id = l.scout_id
-     ORDER BY (l.role = 'super_admin') DESC, l.troop_id, (l.role = 'admin') DESC, (l.role = 'leader') DESC, (l.role = 'mod') DESC, l.id`);
+    `SELECT l.id, l.username, l.role, l.created_at, l.scout_id, l.troop_id, s.name AS scout_name, (t.theme = 'rovers') AS rovers
+     FROM leaders l LEFT JOIN scouts s ON s.id = l.scout_id LEFT JOIN troops t ON t.id = l.troop_id
+     ORDER BY (l.role = 'super_admin') DESC, l.troop_id, (l.role = 'general_leader') DESC, (l.role = 'admin') DESC, (l.role = 'leader') DESC, (l.role = 'mod') DESC, (l.role = 'helper') DESC, l.id`);
   res.json(rows.map((r) => ({ ...r, can_manage: canManage(req, r) })));
 }));
 app.post('/api/leaders', requireLeader, requireSuper, wrap(async (req, res) => {
@@ -686,9 +724,9 @@ app.post('/api/leaders', requireLeader, requireSuper, wrap(async (req, res) => {
   const password = req.body?.password;
   if (!/^[a-z0-9_.-]{3,40}$/.test(username)) throw invalid();
   if (typeof password !== 'string' || password.length < 8 || password.length > 200) return bad(res, 'weak_password');
-  // new accounts are admins, leaders (like an admin, but can switch troops and have no roles/tags) or mods (members and their activity only)
+  // new accounts are admins, leaders (like an admin, but can switch troops and have no roles/tags) or mods / helpers (members and their activity only)
   const role = req.body?.role == null || req.body.role === '' ? 'admin' : req.body.role;
-  if (!['admin', 'leader', 'mod'].includes(role)) throw invalid();
+  if (!ACCOUNT_ROLES.includes(role)) throw invalid();
   const display = text(req.body?.display_name, 60) || username;
   // a new account starts in the leaders' patrol only (automatic, see in_council); its regular patrol, if any, is set later from its scout page
   const patrolId = null;
@@ -720,6 +758,20 @@ app.delete('/api/leaders/:id', requireLeader, requireSuper, wrap(async (req, res
   res.json({ ok: true });
 }));
 
+// change an account's level (the super admin only; never its own or the super admin's). The account keeps its session and its scout profile; the new level applies from its next request
+app.put('/api/leaders/:id/role', requireLeader, requireSuper, wrap(async (req, res) => {
+  const id = intId(req.params.id), role = req.body?.role;
+  if (!ACCOUNT_ROLES.includes(role)) throw invalid();
+  const t = (await pool.query('SELECT id, username, role, troop_id, scout_id FROM leaders WHERE id = $1', [id])).rows[0];
+  if (!t) return bad(res, 'not_found', 404);
+  if (!canManage(req, t)) return bad(res, 'forbidden', 403);
+  if (t.role !== role) {
+    await pool.query('UPDATE leaders SET role = $1 WHERE id = $2', [role, id]);
+    audit(req.leader, 'leader_role', { name: t.username, from: t.role, role }, t.troop_id);
+  }
+  res.json({ ok: true, role });
+}));
+
 // reset someone else's password (the super admin's own password can only be changed by the super admin or with reset-password.js)
 app.put('/api/leaders/:id/password', requireLeader, requireSuper, wrap(async (req, res) => {
   const id = intId(req.params.id);
@@ -739,13 +791,13 @@ app.get('/api/audit', requireLeader, requireSuper, wrap(async (req, res) => {
   const troop = req.query.troop ? intId(req.query.troop) : null, before = req.query.before ? intId(req.query.before) : null;
   const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 200, 1), 500);
   res.json((await pool.query(
-    `SELECT id, leader_name, action, meta, created_at, troop_id FROM audit_log
+    `SELECT id, leader_name, ${whoSql('audit_log.leader_id', 'leader')}, action, meta, created_at, troop_id FROM audit_log
      WHERE action NOT IN ('login', 'logout') AND ($1::int IS NULL OR troop_id = $1) AND ($2::int IS NULL OR id < $2) ORDER BY id DESC LIMIT $3`, [troop, before, limit])).rows);
 }));
 
 // ---- home page: news, activities and events (public to read; admins, leaders and the super admin write; mods don't) ----
 const POST_KINDS = ['news', 'activity', 'event'];
-const requirePoster = (req, res, next) => (req.leader.role === 'mod' ? bad(res, 'forbidden', 403) : next());
+const requirePoster = (req, res, next) => (isHelper(req.leader) ? bad(res, 'forbidden', 403) : next());
 const postFields = (b) => {
   const kind = b?.kind ?? 'news';
   if (!POST_KINDS.includes(kind)) throw invalid();
@@ -815,14 +867,18 @@ app.delete('/api/posts/:id', requireLeader, requirePoster, wrap(async (req, res)
   res.json({ ok: true });
 }));
 
-// ---- weekly reports: what each troop did at its Saturday meeting. Everyone (visitors too) can read them all; the super admin and leaders write for any troop,
+// ---- weekly reports: what each troop did at its Saturday meeting. Everyone can read them all (public); the super admin and leaders write for any troop,
 // admins and mods only for their own troop (one report per troop and Saturday) ----
 const isSaturday = (d) => new Date(d + 'T00:00:00Z').getUTCDay() === 6;
-app.get('/api/reports', wrap(async (req, res) => { // public: the author is shown by scout name only (never a login username)
+app.get('/api/reports', wrap(async (req, res) => {
   res.json((await pool.query(
-    `SELECT r.id, r.troop_id, r.week_date::text AS week_date, r.body, r.updated_at, sc.name AS author
+    `SELECT r.id, r.troop_id, r.week_date::text AS week_date, r.body, r.updated_at, COALESCE(sc.name, l.username) AS author, ${whoSql('COALESCE(r.updated_by, r.created_by)', 'author')}
      FROM weekly_reports r LEFT JOIN leaders l ON l.id = COALESCE(r.updated_by, r.created_by) LEFT JOIN scouts sc ON sc.id = l.scout_id
      ORDER BY r.week_date DESC, r.troop_id LIMIT 600`)).rows);
+}));
+// the weeks that were removed from the page (public: the page leaves them out)
+app.get('/api/reports/removed-weeks', wrap(async (req, res) => {
+  res.json((await pool.query('SELECT week_date::text AS week_date FROM report_weeks_removed ORDER BY week_date DESC')).rows.map((r) => r.week_date));
 }));
 // write (or rewrite) a troop's report for a week: PUT because there is only ever one
 app.put('/api/reports', requireLeader, wrap(async (req, res) => {
@@ -835,6 +891,7 @@ app.put('/api/reports', requireLeader, wrap(async (req, res) => {
     troop = req.body?.troop_id == null ? req.troop : intId(req.body.troop_id);
     if (!(await troopList()).some((x) => x.id === troop)) throw invalid();
   }
+  await pool.query('DELETE FROM report_weeks_removed WHERE week_date = $1', [week]); // writing a report for a removed week puts the week back
   const { rows } = await pool.query(
     `INSERT INTO weekly_reports (troop_id, week_date, body, created_by, updated_by) VALUES ($1,$2,$3,$4,$4)
      ON CONFLICT (troop_id, week_date) DO UPDATE SET body = EXCLUDED.body, updated_by = EXCLUDED.updated_by, updated_at = now() RETURNING id`,
@@ -848,6 +905,21 @@ app.delete('/api/reports/:id', requireLeader, wrap(async (req, res) => {
   await pool.query('DELETE FROM weekly_reports WHERE id = $1', [intId(req.params.id)]);
   audit(req.leader, 'report_delete', { name: cur.week_date }, cur.troop_id);
   res.json({ ok: true });
+}));
+
+// remove a whole week from the page: the week itself goes (with every troop's report of it), not just the reports. A week belongs to every troop, so only
+// the super admin and general leaders can (the others delete their own troop's single report)
+app.delete('/api/reports/week/:date', requireLeader, wrap(async (req, res) => {
+  if (!roams(req.leader)) return bad(res, 'forbidden', 403);
+  const week = date(req.params.date);
+  if (!week) throw invalid();
+  const n = await tx(async (c) => {
+    const { rowCount } = await c.query('DELETE FROM weekly_reports WHERE week_date = $1', [week]);
+    await c.query('INSERT INTO report_weeks_removed (week_date, removed_by) VALUES ($1,$2) ON CONFLICT DO NOTHING', [week, req.leader.id]);
+    return rowCount;
+  });
+  audit(req.leader, 'report_week_delete', { name: week, count: n }, null);
+  res.json({ ok: true, deleted: n });
 }));
 
 // ---- depot (مستودع): the inventory. Everyone can read and search it; admins, leaders and the super admin edit and remove items, only the super admin adds them ----
@@ -886,7 +958,7 @@ app.delete('/api/depot/:id', requireLeader, requireAdmin, wrap(async (req, res) 
 // Admins and mods take for their own troop; the super admin and leaders pick the troop. Leaders only (they show who took what). ----
 const when = (v) => { const d = new Date(String(v ?? '')); if (!v || isNaN(d)) throw invalid(); return d.toISOString(); };
 // who may put a take back: the one who made it, the admins of its troop, and the super admin and leaders (who work in every troop)
-const canReturn = (l, b) => b.leader_id === l.id || roams(l) || (l.role === 'admin' && b.troop_id === l.troop_id);
+const canReturn = (l, b) => b.leader_id === l.id || roams(l) || (isTroopStaff(l) && b.troop_id === l.troop_id);
 // the basket: [{ item_id, quantity }], the same item twice is added up; 1-100 different items
 const basketOf = (v) => {
   if (!Array.isArray(v) || !v.length || v.length > 100) throw invalid();
@@ -905,7 +977,7 @@ const logItems = (lines) => lines.map((x) => ({ name_en: x.name_en, name_ar: x.n
 app.get('/api/depot/takes', requireLeader, wrap(async (req, res) => {
   const hist = req.query.returned === '1';
   const { rows } = await pool.query(
-    `SELECT b.id, b.troop_id, b.taken_at, b.returned_at, b.note, b.leader_id, COALESCE(sc.name, b.leader_name) AS leader_name,
+    `SELECT b.id, b.troop_id, b.taken_at, b.returned_at, b.note, b.leader_id, COALESCE(sc.name, b.leader_name) AS leader_name, ${whoSql('b.leader_id', 'leader')},
             t.name_en AS troop_name_en, t.name_ar AS troop_name_ar,
             COALESCE(json_agg(json_build_object('item_id', bi.item_id, 'quantity', bi.quantity) ORDER BY bi.item_id) FILTER (WHERE bi.item_id IS NOT NULL), '[]') AS items
      FROM depot_takes b LEFT JOIN troops t ON t.id = b.troop_id LEFT JOIN depot_take_items bi ON bi.take_id = b.id
@@ -1146,6 +1218,247 @@ app.put('/api/meetings/:id/attendance/:scoutId', requireLeader, wrap(async (req,
     if (status === 'absent' && m.absent_xp) audit(req.leader, 'absence', meta(-m.absent_xp), req.troop);
     if (status === 'excused') audit(req.leader, 'absence_excused', { name: sc.name, title: m.title }, req.troop);
   }
+  res.json({ ok: true });
+}));
+
+// ---- the musical team (الفريق الموسيقي): one team for the whole site, made of existing scouts (each keeps their scout profile in their own troop; nobody is created here)
+// in two groups, brass (فريق نحاسي) and percussion (فريق إيقاع), each split into two sub teams (فريق أول / فريق ثاني). It has its own weekly practices (تدريبات) with attendance, its own XP (music_xp_log) separate from
+// every troop's XP. Everyone can see the team, its groups and the XP; the attendance register is signed-in only. The super admin, admins and leaders manage it
+// (members from any troop, practices, attendance, XP, the instruments depot): every signed-in account except the helper; the helper only looks. ----
+const MUSIC_GROUPS = ['brass', 'percussion'];
+const musicGroup = (v) => { if (!MUSIC_GROUPS.includes(v)) throw invalid(); return v; };
+// each group has two sub teams: 1 (فريق أول) and 2 (فريق ثاني); none given = 1
+const musicSub = (v) => { const n = v == null || v === '' ? 1 : Number(v); if (n !== 1 && n !== 2) throw invalid(); return n; };
+const requireMusicManager = (req, res, next) => (req.leader.role !== 'helper' ? next() : bad(res, 'forbidden', 403)); // every signed-in account but the helper
+// the members that can be on a sheet: active scouts (a deactivated member is hidden, and comes back when reactivated)
+const MUSIC_TEAM = 'SELECT mb.scout_id AS id FROM music_members mb JOIN scouts s ON s.id = mb.scout_id WHERE s.active';
+const MUSIC_PHOTO = '(s.photo IS NOT NULL AND NOT s.photo_hidden) AS has_photo'; // like the dashboard: a hidden picture stays hidden
+
+// public: the team, both groups, with each member's own troop and music XP
+app.get('/api/music', wrap(async (req, res) => {
+  res.json((await pool.query(
+    `SELECT s.id, s.name, mb.grp, mb.sub, s.troop_id, s.photo_v, ${MUSIC_PHOTO},
+       COALESCE((SELECT SUM(x.xp) FROM music_xp_log x WHERE x.scout_id = s.id), 0)::int AS total_xp
+     FROM music_members mb JOIN scouts s ON s.id = mb.scout_id WHERE s.active
+     ORDER BY mb.grp, mb.sub, total_xp DESC, s.name`)).rows);
+}));
+// public: one member's page (music XP history)
+app.get('/api/music/members/:id', wrap(async (req, res) => {
+  const id = intId(req.params.id);
+  const [s, log] = await Promise.all([
+    pool.query(`SELECT s.id, s.name, s.troop_id, mb.grp, mb.sub, s.photo_v, ${MUSIC_PHOTO} FROM music_members mb JOIN scouts s ON s.id = mb.scout_id WHERE s.id = $1 AND s.active`, [id]),
+    pool.query(
+      `SELECT id, activity, activity_ar, xp, note, COALESCE(activity_date, created_at::date)::text AS day
+       FROM music_xp_log WHERE scout_id = $1 ORDER BY COALESCE(activity_date, created_at::date) DESC, created_at DESC, id DESC`, [id])]);
+  if (!s.rows[0]) return bad(res, 'not_found', 404);
+  res.json({ ...s.rows[0], roles: [], total_xp: log.rows.reduce((sum, r) => sum + r.xp, 0), log: log.rows });
+}));
+
+// managers: the scouts that can still be added (active, any troop, not the super admin who belongs to none)
+app.get('/api/music/candidates', requireLeader, requireMusicManager, wrap(async (req, res) => {
+  res.json((await pool.query(
+    `SELECT s.id, s.name, s.troop_id FROM scouts s
+     WHERE s.active AND ${NOT_SUPER} AND NOT EXISTS (SELECT 1 FROM music_members mb WHERE mb.scout_id = s.id) ORDER BY s.troop_id, s.name`)).rows);
+}));
+app.post('/api/music/members', requireLeader, requireMusicManager, wrap(async (req, res) => {
+  const id = intId(req.body?.scout_id), grp = musicGroup(req.body?.grp), sub = musicSub(req.body?.sub);
+  const sc = (await pool.query(`SELECT s.id, s.name, s.troop_id FROM scouts s WHERE s.id = $1 AND s.active AND ${NOT_SUPER}`, [id])).rows[0]; // an existing scout profile: nothing is created here
+  if (!sc) return bad(res, 'not_found', 404);
+  const r = await pool.query('INSERT INTO music_members (scout_id, grp, sub, added_by) VALUES ($1,$2,$3,$4) ON CONFLICT DO NOTHING', [id, grp, sub, req.leader.id]);
+  if (!r.rowCount) return bad(res, 'music_already', 409);
+  audit(req.leader, 'music_member_add', { name: sc.name, group: grp, sub }, sc.troop_id);
+  res.status(201).json({ ok: true });
+}));
+app.put('/api/music/members/:id', requireLeader, requireMusicManager, wrap(async (req, res) => {
+  const grp = musicGroup(req.body?.grp), sub = musicSub(req.body?.sub);
+  const { rows } = await pool.query('UPDATE music_members mb SET grp = $1, sub = $2 FROM scouts s WHERE mb.scout_id = $3 AND s.id = mb.scout_id RETURNING s.name, s.troop_id', [grp, sub, intId(req.params.id)]);
+  if (!rows[0]) return bad(res, 'not_found', 404);
+  audit(req.leader, 'music_member_group', { name: rows[0].name, group: grp, sub }, rows[0].troop_id);
+  res.json({ ok: true });
+}));
+// leaving the team: the scout stays in their troop; the team's XP and marks stay stored and come back if they are added again
+app.delete('/api/music/members/:id', requireLeader, requireMusicManager, wrap(async (req, res) => {
+  const { rows } = await pool.query('DELETE FROM music_members mb USING scouts s WHERE mb.scout_id = $1 AND s.id = mb.scout_id RETURNING s.name, s.troop_id', [intId(req.params.id)]);
+  if (rows[0]) audit(req.leader, 'music_member_remove', { name: rows[0].name }, rows[0].troop_id);
+  res.json({ ok: true });
+}));
+
+// the team's own XP: a one-off award with its own title (a negative value deducts), and undoing an entry
+app.post('/api/music/members/:id/xp', requireLeader, requireMusicManager, wrap(async (req, res) => {
+  const id = intId(req.params.id), title = text(req.body?.title, 80), xp = Number(req.body?.xp), note = text(req.body?.note, 200), day = date(req.body?.date);
+  if (!title || !Number.isInteger(xp) || xp === 0 || Math.abs(xp) > 10000) throw invalid();
+  if (day && Date.parse(day) > Date.now() + 2 * 86400000) throw invalid(); // no dates in the future
+  const sc = (await pool.query('SELECT s.name, s.troop_id FROM music_members mb JOIN scouts s ON s.id = mb.scout_id WHERE s.id = $1 AND s.active', [id])).rows[0];
+  if (!sc) return bad(res, 'not_found', 404);
+  await pool.query(
+    'INSERT INTO music_xp_log (scout_id, activity, activity_ar, xp, note, leader_id, activity_date) VALUES ($1,$2,$2,$3,$4,$5, COALESCE($6::date, CURRENT_DATE))', [id, title, xp, note, req.leader.id, day]);
+  audit(req.leader, 'music_xp_award', { name: sc.name, activity_en: title, activity_ar: title, xp }, sc.troop_id);
+  res.status(201).json({ ok: true });
+}));
+app.delete('/api/music/xp/:id', requireLeader, requireMusicManager, wrap(async (req, res) => {
+  const { rows } = await pool.query(
+    'DELETE FROM music_xp_log x USING scouts s WHERE x.id = $1 AND s.id = x.scout_id RETURNING s.name, s.troop_id, x.activity, x.activity_ar, x.xp', [intId(req.params.id)]);
+  if (rows[0]) audit(req.leader, 'music_xp_undo', { name: rows[0].name, activity_en: rows[0].activity, activity_ar: rows[0].activity_ar || rows[0].activity, xp: rows[0].xp }, rows[0].troop_id);
+  res.json({ ok: true });
+}));
+
+// ---- the team's depot: the instruments inventory (public to read; the managers add, edit and remove). Not the troops' depot, and nothing is taken out of it ----
+const musicDepotBody = (b) => {
+  const en = text(b?.name_en, 80), ar = text(b?.name_ar, 80), quantity = Number(b?.quantity);
+  const grp = b?.grp == null || b.grp === '' ? null : musicGroup(b.grp); // empty: used by both groups
+  if ((!en && !ar) || !Number.isInteger(quantity) || quantity < 0 || quantity > 1000000) throw invalid();
+  return [en || ar, ar || en, grp, quantity, text(b?.notes, 500)];
+};
+app.get('/api/music/depot', wrap(async (req, res) => {
+  res.json((await pool.query('SELECT id, name_en, name_ar, grp, quantity, notes, updated_at FROM music_depot_items ORDER BY name_ar, id')).rows);
+}));
+app.post('/api/music/depot', requireLeader, requireMusicManager, wrap(async (req, res) => {
+  const v = musicDepotBody(req.body);
+  const { rows } = await pool.query('INSERT INTO music_depot_items (name_en, name_ar, grp, quantity, notes) VALUES ($1,$2,$3,$4,$5) RETURNING id', v);
+  audit(req.leader, 'music_depot_add', { name: v[0], quantity: v[3] }, null);
+  res.status(201).json({ id: rows[0].id });
+}));
+app.put('/api/music/depot/:id', requireLeader, requireMusicManager, wrap(async (req, res) => {
+  const v = musicDepotBody(req.body);
+  const r = await pool.query('UPDATE music_depot_items SET name_en = $1, name_ar = $2, grp = $3, quantity = $4, notes = $5, updated_at = now() WHERE id = $6', [...v, intId(req.params.id)]);
+  if (!r.rowCount) return bad(res, 'not_found', 404);
+  audit(req.leader, 'music_depot_update', { name: v[0], quantity: v[3] }, null);
+  res.json({ ok: true });
+}));
+app.delete('/api/music/depot/:id', requireLeader, requireMusicManager, wrap(async (req, res) => {
+  const { rows } = await pool.query('DELETE FROM music_depot_items WHERE id = $1 RETURNING name_en', [intId(req.params.id)]);
+  if (rows[0]) audit(req.leader, 'music_depot_delete', { name: rows[0].name_en }, null);
+  res.json({ ok: true });
+}));
+
+// ---- the team's practices (تدريبات, the weekly practice meetings) and attendance (signed-in accounts read them; the managers write) ----
+const musicMeetingBody = (b) => {
+  const day = date(b?.date);
+  if (!day || Date.parse(day) > Date.now() + 2 * 86400000) throw invalid(); // a date is required; none in the future
+  const title = text(b?.title, 80);
+  if (!title) throw invalid(); // a title is required
+  const xps = [b?.xp == null || b.xp === '' ? 10 : Number(b.xp), b?.absent_xp == null || b.absent_xp === '' ? 0 : Number(b.absent_xp)];
+  if (xps.some((x) => !Number.isInteger(x) || x < 0 || x > 1000)) throw invalid(); // XP for attending / taken for absence: 0 (none) to 1000
+  return [day, title, ...xps];
+};
+const musicMeetingOf = async (id) => (await pool.query('SELECT id, meeting_date, title, xp, absent_xp FROM music_meetings WHERE id = $1', [id])).rows[0];
+// give these members the XP of their mark for this meeting (one entry per member and meeting; a second grant is a no-op), same names as the troops' attendance entries
+async function musicGrant(c, m, ids, leader, present) {
+  const xp = present ? m.xp : m.absent_xp, names = present ? ATTENDED : ABSENT;
+  if (!ids.length || !xp) return;
+  await c.query(
+    `INSERT INTO music_xp_log (scout_id, activity, activity_ar, xp, leader_id, activity_date, meeting_id)
+     SELECT sid, $2::text || mt.title, $3::text || mt.title, $4, $5, mt.meeting_date, mt.id FROM music_meetings mt, unnest($1::int[]) AS sid WHERE mt.id = $6
+     ON CONFLICT (meeting_id, scout_id) WHERE meeting_id IS NOT NULL DO NOTHING`, [ids, names[0], names[1], present ? xp : -xp, leader.id, m.id]);
+}
+
+app.get('/api/music/meetings', requireLeader, wrap(async (req, res) => {
+  res.json((await pool.query(
+    `SELECT m.id, m.meeting_date, m.title, m.xp, m.absent_xp,
+       (SELECT COUNT(*) FROM music_attendance a JOIN music_members mb ON mb.scout_id = a.scout_id JOIN scouts s ON s.id = a.scout_id WHERE a.meeting_id = m.id AND a.status = 'present' AND s.active)::int AS present
+     FROM music_meetings m ORDER BY m.meeting_date DESC, m.id DESC LIMIT 300`)).rows);
+}));
+// per member: meetings attended out of those held since they were added (or that they were marked for)
+app.get('/api/music/summary', requireLeader, wrap(async (req, res) => {
+  res.json((await pool.query(
+    `SELECT mb.scout_id AS id, COUNT(mt.id)::int AS total, COUNT(a.scout_id) FILTER (WHERE a.status = 'present')::int AS attended
+     FROM music_members mb JOIN scouts s ON s.id = mb.scout_id AND s.active
+     LEFT JOIN music_meetings mt ON mt.meeting_date >= mb.added_at::date OR EXISTS (SELECT 1 FROM music_attendance x WHERE x.meeting_id = mt.id AND x.scout_id = mb.scout_id)
+     LEFT JOIN music_attendance a ON a.meeting_id = mt.id AND a.scout_id = mb.scout_id
+     GROUP BY mb.scout_id`)).rows);
+}));
+app.post('/api/music/meetings', requireLeader, requireMusicManager, wrap(async (req, res) => {
+  const [day, title, xp, absentXp] = musicMeetingBody(req.body);
+  const { rows } = await pool.query('INSERT INTO music_meetings (meeting_date, title, xp, absent_xp, created_by) VALUES ($1,$2,$3,$4,$5) RETURNING id, meeting_date, title, xp, absent_xp', [day, title, xp, absentXp, req.leader.id]);
+  audit(req.leader, 'music_meeting_add', { name: `${day} ${title}` }, null);
+  res.status(201).json({ ...rows[0], present: 0 });
+}));
+app.get('/api/music/meetings/:id', requireLeader, wrap(async (req, res) => {
+  const m = await musicMeetingOf(intId(req.params.id));
+  if (!m) return bad(res, 'not_found', 404);
+  const marks = (await pool.query('SELECT scout_id, status FROM music_attendance WHERE meeting_id = $1', [m.id])).rows;
+  const ids = (st) => marks.filter((r) => r.status === st).map((r) => r.scout_id);
+  res.json({ ...m, present_ids: ids('present'), absent_ids: ids('absent'), excused_ids: ids('excused') });
+}));
+app.put('/api/music/meetings/:id', requireLeader, requireMusicManager, wrap(async (req, res) => {
+  const [day, title, xp, absentXp] = musicMeetingBody(req.body);
+  const m = await musicMeetingOf(intId(req.params.id));
+  if (!m) return bad(res, 'not_found', 404);
+  await tx(async (c) => {
+    await c.query('UPDATE music_meetings SET meeting_date = $1, title = $2, xp = $3, absent_xp = $4 WHERE id = $5', [day, title, xp, absentXp, m.id]);
+    // the XP already given follows the meeting's new date, title and values (0 removes it; raising it from 0 gives it to those already marked)
+    for (const [status, names, newXp, oldXp, sign] of [['present', ATTENDED, xp, m.xp, 1], ['absent', ABSENT, absentXp, m.absent_xp, -1]]) {
+      if (newXp === 0) {
+        await c.query('DELETE FROM music_xp_log x USING music_attendance t WHERE x.meeting_id = $1 AND t.meeting_id = x.meeting_id AND t.scout_id = x.scout_id AND t.status = $2', [m.id, status]);
+        continue;
+      }
+      await c.query(
+        `UPDATE music_xp_log x SET activity = $1::text || $3::text, activity_ar = $2::text || $3::text, xp = $4, note = NULL, activity_date = $5
+         FROM music_attendance t WHERE x.meeting_id = $6 AND t.meeting_id = x.meeting_id AND t.scout_id = x.scout_id AND t.status = $7`, [names[0], names[1], title, sign * newXp, day, m.id, status]);
+      if (!oldXp) {
+        const ids = (await c.query(
+          `SELECT t.scout_id FROM music_attendance t JOIN music_members mb ON mb.scout_id = t.scout_id JOIN scouts s ON s.id = t.scout_id WHERE t.meeting_id = $1 AND t.status = $2 AND s.active`, [m.id, status])).rows.map((r) => r.scout_id);
+        await musicGrant(c, { id: m.id, xp, absent_xp: absentXp }, ids, req.leader, status === 'present');
+      }
+    }
+  });
+  audit(req.leader, 'music_meeting_update', { name: `${day} ${title}` }, null);
+  res.json({ ok: true });
+}));
+app.delete('/api/music/meetings/:id', requireLeader, requireMusicManager, wrap(async (req, res) => {
+  const { rows } = await pool.query('DELETE FROM music_meetings WHERE id = $1 RETURNING meeting_date, title', [intId(req.params.id)]); // its marks and the XP they gave go with it
+  if (rows[0]) audit(req.leader, 'music_meeting_delete', { name: `${rows[0].meeting_date} ${rows[0].title}` }, null);
+  res.json({ ok: true });
+}));
+// everyone at once. status: 'present' = every active member present; 'absent' = the members with no mark yet absent (no excuse); 'none' = clear the whole sheet
+app.put('/api/music/meetings/:id/attendance', requireLeader, requireMusicManager, wrap(async (req, res) => {
+  const m = await musicMeetingOf(intId(req.params.id));
+  if (!m) return bad(res, 'not_found', 404);
+  const status = req.body?.status;
+  if (!['present', 'absent', 'none'].includes(status)) throw invalid();
+  const count = await tx(async (c) => {
+    if (status === 'present') {
+      // members marked absent become present: their absence XP goes first
+      await c.query(`DELETE FROM music_xp_log x USING music_attendance a WHERE x.meeting_id = $1 AND a.meeting_id = x.meeting_id AND a.scout_id = x.scout_id AND a.status = 'absent' AND a.scout_id IN (${MUSIC_TEAM})`, [m.id]);
+      const r = await c.query(
+        `INSERT INTO music_attendance (meeting_id, scout_id, status) SELECT $1::int, e.id, 'present' FROM (${MUSIC_TEAM}) e
+         ON CONFLICT (meeting_id, scout_id) DO UPDATE SET status = 'present' WHERE music_attendance.status <> 'present' RETURNING scout_id`, [m.id]);
+      await musicGrant(c, m, r.rows.map((x) => x.scout_id), req.leader, true); // only those newly marked
+      return r.rowCount;
+    }
+    if (status === 'absent') {
+      const r = await c.query(
+        `INSERT INTO music_attendance (meeting_id, scout_id, status) SELECT $1::int, e.id, 'absent' FROM (${MUSIC_TEAM}) e
+         WHERE NOT EXISTS (SELECT 1 FROM music_attendance a WHERE a.meeting_id = $1 AND a.scout_id = e.id) ON CONFLICT DO NOTHING RETURNING scout_id`, [m.id]);
+      await musicGrant(c, m, r.rows.map((x) => x.scout_id), req.leader, false);
+      return r.rowCount;
+    }
+    const a = await c.query('DELETE FROM music_attendance WHERE meeting_id = $1', [m.id]);
+    await c.query('DELETE FROM music_xp_log WHERE meeting_id = $1', [m.id]);
+    return a.rowCount;
+  });
+  if (count) audit(req.leader, 'music_mark_bulk', { title: m.title, status, count }, null);
+  res.json({ ok: true });
+}));
+// one member: status = 'present' | 'absent' (no excuse: loses the absence XP) | 'excused' (no XP) | 'none'. Changing a mark takes the old mark's XP back and gives the new one's.
+app.put('/api/music/meetings/:id/attendance/:scoutId', requireLeader, requireMusicManager, wrap(async (req, res) => {
+  const m = await musicMeetingOf(intId(req.params.id));
+  if (!m) return bad(res, 'not_found', 404);
+  const status = req.body?.status;
+  if (!['present', 'absent', 'excused', 'none'].includes(status)) throw invalid();
+  const sid = intId(req.params.scoutId);
+  const sc = (await pool.query('SELECT s.name, s.troop_id, s.active FROM music_members mb JOIN scouts s ON s.id = mb.scout_id WHERE mb.scout_id = $1', [sid])).rows[0]; // only a member of the team
+  if (!sc || (status !== 'none' && !sc.active)) return bad(res, 'not_found', 404);
+  const before = await tx(async (c) => {
+    const prev = (await c.query('SELECT status FROM music_attendance WHERE meeting_id = $1 AND scout_id = $2', [m.id, sid])).rows[0]?.status || 'none';
+    if (prev === status) return prev; // nothing changes
+    await c.query('DELETE FROM music_attendance WHERE meeting_id = $1 AND scout_id = $2', [m.id, sid]);
+    await c.query('DELETE FROM music_xp_log WHERE meeting_id = $1 AND scout_id = $2', [m.id, sid]); // the old mark's XP is taken back
+    if (status !== 'none') await c.query('INSERT INTO music_attendance (meeting_id, scout_id, status) VALUES ($1,$2,$3)', [m.id, sid, status]);
+    if (status === 'present' || status === 'absent') await musicGrant(c, m, [sid], req.leader, status === 'present'); // an excused absence takes nothing
+    return prev;
+  });
+  if (before !== status) audit(req.leader, 'music_mark', { name: sc.name, title: m.title, status, xp: status === 'present' ? m.xp : status === 'absent' ? -m.absent_xp : 0 }, sc.troop_id);
   res.json({ ok: true });
 }));
 

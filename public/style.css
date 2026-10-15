@@ -686,3 +686,11 @@ html[dir=ltr] select:not([multiple]):not([size]) { background-position: right .7
   .cs-opt { padding: .85rem .9rem; border-radius: 14px; font-size: 1.05rem; }
 }
 @media (prefers-reduced-motion: reduce) { .cs-pop, .cs-dim { animation: none; } }
+
+/* the scout import preview (leader area, Add scout tab) */
+.import-table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+.import-table th, .import-table td { border: 1px solid var(--line); padding: .3rem .5rem; text-align: start; vertical-align: top; white-space: nowrap; }
+.import-table th { background: var(--accent-soft); }
+.import-table .import-note { color: var(--muted); white-space: normal; min-width: 9rem; }
+.import-table tr.import-bad td { background: rgba(179, 38, 30, .08); }
+#importPanel textarea { margin: .5rem 0; }
