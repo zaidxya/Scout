@@ -1,0 +1,22 @@
+{
+  "name": "كشاف الفوج الثاني",
+  "short_name": "كشاف الفوج الثاني",
+  "description": "تتبّع نشاط الكشافة ونقاطهم وحضورهم وتقارير الفرق والفريق الموسيقي",
+  "lang": "ar",
+  "dir": "rtl",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f6f0fa",
+  "theme_color": "#671e93",
+  "icons": [
+    { "src": "/pwa-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/pwa-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "shortcuts": [
+    { "name": "قائمة الكشافة", "url": "/scouts.html", "icons": [{ "src": "/pwa-icon-192.png", "sizes": "192x192" }] },
+    { "name": "التقارير الأسبوعية", "url": "/reports.html", "icons": [{ "src": "/pwa-icon-192.png", "sizes": "192x192" }] },
+    { "name": "الفريق الموسيقي", "url": "/music.html", "icons": [{ "src": "/pwa-icon-192.png", "sizes": "192x192" }] },
+    { "name": "القيادة", "url": "/leader.html", "icons": [{ "src": "/pwa-icon-192.png", "sizes": "192x192" }] }
+  ]
+}

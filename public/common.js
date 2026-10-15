@@ -460,3 +460,6 @@ document.addEventListener('DOMContentLoaded', paintMenu);
   new MutationObserver((ms) => ms.forEach((m) => m.addedNodes.forEach((n) => { if (n.nodeType === 1) scan(n); }))).observe(document.documentElement, { childList: true, subtree: true });
   document.addEventListener('DOMContentLoaded', () => scan(document));
 })();
+
+// installable app (PWA): the service worker (/sw.js) only shows the offline page and keeps the site's own files; it never stores data from /api
+if ('serviceWorker' in navigator) window.addEventListener('load', () => { navigator.serviceWorker.register('/sw.js').catch(() => { /* not available (no HTTPS, private window...): the site works as before */ }); });

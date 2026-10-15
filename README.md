@@ -74,6 +74,14 @@ The project is handed over as a zip in a new conversation each time, so these Ma
 | Full name, phone, join date, date of birth, address, guardian name and phone, medical notes, interests / hobbies | no | yes |
 | Deactivated scouts (including their photo) | no | yes |
 
+## Install as an app (PWA)
+
+The site can be installed on a phone or computer like an app (its own icon, no browser bars). It needs **HTTPS** (Render provides it; `localhost` also works).
+- **Android (Chrome):** menu ⋮ > **Install app** / **Add to Home screen**. **iPhone / iPad (Safari):** Share > **Add to Home Screen**. **Computer (Chrome / Edge):** the install icon in the address bar.
+- Files: `public/manifest.json` (name, Arabic and right-to-left, purple theme colour, icons, shortcuts to the scout list, reports, musical team and leader area), `public/pwa-icon-192.png` / `pwa-icon-512.png` (the logo on the purple background, with a safe margin so round icons don't cut it), `public/sw.js` (the service worker, registered by `common.js`) and `public/offline.html`.
+- **What the service worker does, and does not do:** pages and every `/api/` call always go to the network (so data is never stale, nothing private is stored on the device and an update shows at once); it only keeps the scripts, styles, language files and images (network first) so the look survives a dropped connection, and shows `offline.html` ("no internet connection", with a Retry button) when a page can't be loaded. **The app does not work offline for data.** To force a cleaned cache after a big change, change `CACHE` (`scout-v1`) in `sw.js`.
+- Each troop theme still changes the browser's colour bar while the page is open; the installed app's icon and splash colour are always the main purple ones.
+
 ## Account levels
 
 There are six account levels (`leaders.role`: `super_admin`, `general_leader`, `admin`, `leader`, `mod`, `helper`). The level alone decides what an account may do; there are no separate permissions. **Names in the interface:** admin = **نائب القائد** (Deputy leader), leader = **القائد**, mod = **مساعد القائد** (Assistant leader), general_leader = **القائد العام** (General leader), helper = **عريف**, or **رائد** when the account's troop has the Rovers theme (the name is picked from the troop, so it follows the account; `accountLevel()` in `common.js`); the super admin stays **المشرف العام**. **Deputy, assistant and leader are one level under three names** (`isTroopStaff()` on the server): they work in their own troop only and have no Activities and no Roles & tags (those are the super admin's alone). **The general leader has the same permissions but works in every troop** (`roams()`: the troop switcher, posts and reports for any troop, putting back any bookings), like the super admin without Administration. **The helper is the limited level** (see Helper below) and can only look at the musical team. The super admin can change any account's level afterwards (Administration > Accounts).
@@ -144,6 +152,7 @@ public/
   account.html     My account (username, password, sign out)
   common.js        Language switching, API helper, header menu, themes, shared rendering, confirmBox() popup
   style.css        Main theme and troop themes (colors are CSS variables)
+  manifest.json, sw.js, offline.html, pwa-icon-192.png, pwa-icon-512.png   The installable app (see "Install as an app")
   i18n/            en.json and ar.json: all interface text (same keys in both)
   logo-*.png, favicon-v2.png
 ```
