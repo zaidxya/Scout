@@ -277,6 +277,7 @@
         case 'xp_undo': case 'music_xp_undo': return `${verb} ${signed(m.xp)} ${t('xp')} (${act}) ${t('audit_from')} ${m.name}`;
         case 'activity_add': return `${verb} ${ar ? m.name_ar : m.name_en} (${signed(m.xp)} ${t('xp')})`;
         case 'activity_delete': return `${verb} ${ar ? m.name_ar : m.name_en}`;
+        case 'depot_history_delete': return `${verb} × ${fmt(m.count || 1)}`;
         case 'site_font': return `${verb}: ${m.font && SITE_FONTS[m.font] ? SITE_FONTS[m.font][ar ? 'ar' : 'en'] : ''}`;
         case 'scout_deactivate': return `${verb} ${m.name}${m.reason ? ` (${m.reason})` : ''}`;
         case 'scout_patrol': return `${verb} ${m.name}${m.patrol ? ` (${m.patrol})` : ''}`;

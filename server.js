@@ -376,6 +376,16 @@ app.get('/api/leader/scouts', requireLeader, wrap(async (req, res) => {
        EXISTS (SELECT 1 FROM leaders l WHERE l.scout_id = s.id) AS is_leader,
        EXISTS (SELECT 1 FROM leaders l WHERE l.scout_id = s.id AND l.role = 'super_admin') AS is_super,
        EXISTS (SELECT 1 FROM leaders l WHERE l.scout_id = s.id AND l.role <> 'super_admin') AS in_council,
+       -- details still empty (the leader list flags them): a scout needs a full name, phone, join date, birth date, guardian name and phone, and address; accounts (every leader profile, the super admin too) are never flagged
+       CASE WHEN EXISTS (SELECT 1 FROM leaders l WHERE l.scout_id = s.id) THEN ARRAY[]::text[] ELSE ARRAY_REMOVE(ARRAY[
+         CASE WHEN COALESCE(BTRIM(s.full_name), '') = '' THEN 'full_name' END,
+         CASE WHEN COALESCE(BTRIM(s.phone), '') = '' THEN 'phone' END,
+         CASE WHEN s.join_date IS NULL THEN 'join_date' END,
+         CASE WHEN s.birth_date IS NULL THEN 'birth_date' END,
+         CASE WHEN COALESCE(BTRIM(s.guardian_name), '') = '' THEN 'guardian_name' END,
+         CASE WHEN COALESCE(BTRIM(s.guardian_phone), '') = '' THEN 'guardian_phone' END,
+         CASE WHEN COALESCE(BTRIM(s.address), '') = '' THEN 'address' END
+       ], NULL) END AS missing,
        COALESCE((SELECT json_agg(sl.label_id ORDER BY sl.pos, sl.label_id) FROM scout_labels sl WHERE sl.scout_id = s.id), '[]'::json) AS label_ids
      FROM scouts s
      WHERE s.troop_id = $1
@@ -1035,6 +1045,18 @@ app.post('/api/depot/takes', requireLeader, wrap(async (req, res) => {
   res.status(201).json(out.row);
 }));
 // put back everything in a take
+// the history of what was put back: only the super admin can delete from it (one entry, or all of it); things still out are put back, not deleted
+app.delete('/api/depot/takes/:id', requireLeader, requireSuper, wrap(async (req, res) => {
+  const r = await pool.query('DELETE FROM depot_takes WHERE id = $1 AND returned_at IS NOT NULL', [intId(req.params.id)]);
+  if (!r.rowCount) return bad(res, 'not_found', 404);
+  audit(req.leader, 'depot_history_delete', { count: 1 });
+  res.json({ ok: true });
+}));
+app.delete('/api/depot-history', requireLeader, requireSuper, wrap(async (req, res) => {
+  const r = await pool.query('DELETE FROM depot_takes WHERE returned_at IS NOT NULL');
+  if (r.rowCount) audit(req.leader, 'depot_history_delete', { count: r.rowCount });
+  res.json({ ok: true, deleted: r.rowCount });
+}));
 app.put('/api/depot/takes/:id/return', requireLeader, wrap(async (req, res) => {
   const b = (await pool.query('SELECT id, troop_id, leader_id, returned_at FROM depot_takes WHERE id = $1', [intId(req.params.id)])).rows[0];
   if (!b || b.returned_at) return res.json({ ok: true });

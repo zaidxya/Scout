@@ -797,3 +797,9 @@ header button.mode svg { width: 1.35rem; height: 1.35rem; flex: none; fill: none
   .filter-row input { flex: 1 1 100%; }
   .filter-row select { flex: 1 1 calc(50% - .25rem); width: auto; min-width: 0; max-width: none; }
 }
+/* missing information: a small ! next to the scout in the leader list, amber highlight on the empty fields of the scout's page */
+.warn-mark { display: inline-flex; align-items: center; justify-content: center; width: 1rem; height: 1rem; margin-inline-start: .4rem; border-radius: 50%; background: #e0a100; color: #2b1f00; font-size: .7rem; font-weight: 800; line-height: 1; vertical-align: middle; cursor: help; }
+.hint.warn { color: #8a5a00; font-weight: 600; }
+label.missing { color: #8a5a00; font-weight: 600; }
+label.missing input, label.missing textarea { border-color: #d99a00; background-color: rgba(224,161,0,.1); box-shadow: 0 0 0 2px rgba(224,161,0,.25); }
+:root[data-mode=dark] .hint.warn, :root[data-mode=dark] label.missing { color: #e3b84f; }

@@ -78,6 +78,7 @@
         <details id="pastBox" class="depot-res depot-past hidden">
           <summary data-i18n="depot_past_title"></summary>
           <ul id="pastList" class="depot-list"></ul>
+          <button id="pastClear" class="btn quiet small hidden" type="button" data-i18n="depot_history_clear" style="margin-top:.75rem"></button>
         </details>
       </div>
     </div>
@@ -226,6 +227,10 @@
           what,
           el('small', { class: 'depot-notes' }, t('depot_taken_at') + ' ' + fmtTime(b.taken_at) + (returned ? ' · ' + t('depot_returned_at') + ' ' + fmtTime(b.returned_at) : '')),
           el('small', { class: 'depot-notes', dir: 'auto' }, [t('depot_by').replace('{name}', withRole(b.leader_name, b.leader_role, b.leader_rovers)), b.note].filter(Boolean).join(' — '))),
+        returned && isSuper ? el('button', { class: 'btn quiet small', type: 'button', onclick: async () => {
+          if (!(await confirmBox(t('depot_history_confirm'), t('delete')))) return;
+          try { await api(`/api/depot/takes/${b.id}`, 'DELETE'); msg(t('saved'), true); await loadPast(); } catch (e) { fail(e); }
+        } }, t('delete')) : '',
         !returned && b.can_return ? el('button', { class: 'btn small', type: 'button', onclick: async () => {
           if (!(await confirmBox(t('depot_res_confirm'), t('depot_res_cancel')))) return;
           try { await api(`/api/depot/takes/${b.id}/return`, 'PUT'); msg(t('depot_put_back'), true); await load(); } catch (e) { fail(e); }
@@ -242,12 +247,17 @@
     let past = null;
     function drawPast() {
       if (past) $('pastList').replaceChildren(...(past.length ? past.map((b) => takeRow(b, true)) : [el('li', { class: 'empty' }, t('depot_past_none'))]));
+      $('pastClear').classList.toggle('hidden', !(isSuper && past && past.length)); // the super admin can wipe the whole history
     }
     async function loadPast() {
       if (!$('pastBox').open) return;
       try { past = await api('/api/depot/takes?returned=1'); drawPast(); } catch (e) { fail(e); }
     }
     $('pastBox').addEventListener('toggle', loadPast);
+    $('pastClear').addEventListener('click', async () => {
+      if (!(await confirmBox(t('depot_history_clear_confirm'), t('depot_history_clear')))) return;
+      try { await api('/api/depot-history', 'DELETE'); msg(t('saved'), true); await loadPast(); } catch (e) { fail(e); }
+    });
     // the open row (admins and the super admin): the same fields as adding, with Save / Cancel, and Delete set apart at the end
     function editRow(i) {
       const draft = drafts.get(i.id) || {};

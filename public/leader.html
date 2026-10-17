@@ -303,11 +303,17 @@
 
     const modNoPatrol = () => isMod() && !scouts.some((s) => s.editable); // a mod whose own profile has no patrol can change nobody (its own profile is in its patrol, so a mod with one always has someone)
     const editable = (s) => !s || s.editable !== false; // a mod sees every scout but changes only its patrol's (the server says which)
+    // information still missing: a small ! next to the scout in the list, and the empty fields highlighted on the scout's page
+    const MISSING_KEYS = ['full_name', 'phone', 'join_date', 'birth_date', 'guardian_name', 'guardian_phone', 'address'];
+    const missingMark = (keys) => !keys || !keys.length ? null
+      : el('span', { class: 'warn-mark', role: 'img', title: t('missing_info') + ': ' + keys.map((k) => t('d_' + k)).join(', '), 'aria-label': t('missing_info') }, '!');
+    // the same rule as the server's: only scouts are checked; an account's profile (any leader, the super admin too) is never flagged
+    const missingOf = (d, row) => !d || (row && row.is_leader) ? [] : MISSING_KEYS.filter((k) => !String(d[k] ?? '').trim());
     function drawList() {
       const q = norm($('q').value.trim());
       const live = scouts.filter((s) => s.active !== false), off = scouts.filter((s) => s.active === false);
       renderScoutList($('list'), live.filter((s) => matches(s, q)), current, (id) => openScout(id),
-        (s) => el('span', { class: 'sub' }, chips(s.label_ids)),
+        (s) => { const f = document.createDocumentFragment(); const m = missingMark(s.missing); if (m) f.append(m); f.append(el('span', { class: 'sub' }, chips(s.label_ids))); return f; },
         live.length ? 'no_results' : 'no_scouts', patrols);
       // a mod whose own profile has no patrol yet controls nobody: say why
       if (modNoPatrol()) $('list').prepend(el('li', { class: 'empty' }, t('mod_no_patrol')));
@@ -472,6 +478,15 @@
         field('d_medical', 'medical_notes', det.medical_notes, 'textarea'),
         field('d_notes', 'notes', det.notes, 'textarea'),
         el('button', { class: 'btn', type: 'submit' }, t('save')));
+      const miss = missingOf(det, scouts.find((s) => s.id === data.id));
+      if (miss.length) {
+        form.querySelector('h2').after(el('p', { class: 'hint warn' }, t('missing_hint')));
+        miss.forEach((k) => {
+          const input = form.querySelector(`[name="${k}"]`), lab = input && input.closest('label'); if (!lab) return;
+          lab.classList.add('missing');
+          input.addEventListener('input', () => lab.classList.toggle('missing', !input.value.trim())); // clears as soon as it is filled in
+        });
+      }
       form.addEventListener('submit', async (ev) => {
         ev.preventDefault();
         try { await api('/api/scouts/' + data.id, 'PUT', Object.fromEntries(new FormData(form))); await refresh(); msg(t('saved'), true); }
