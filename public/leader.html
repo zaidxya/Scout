@@ -483,8 +483,9 @@
       const isOff = (scouts.find((s) => s.id === data.id) || {}).active === false;
       const del = el('button', { class: 'btn quiet', type: 'button', style: 'margin-top:1.5rem', onclick: async () => {
         if (isOff) { try { await api(`/api/scouts/${data.id}/active`, 'PUT', { active: true }); msg(t('saved'), true); await refresh(); } catch (e) { fail(e); } return; }
-        if (!(await confirmBox(t('confirm_deactivate'), t('deactivate_scout')))) return;
-        try { await api(`/api/scouts/${data.id}/active`, 'PUT', { active: false }); msg(t('saved'), true); await refresh(); }
+        const reason = await reasonBox(t('confirm_deactivate'), t('deactivate_scout'), 'deactivate_reason', 'deactivate_reason_hint');
+        if (!reason) return;
+        try { await api(`/api/scouts/${data.id}/active`, 'PUT', { active: false, reason }); msg(t('saved'), true); await refresh(); }
         catch (e) { fail(e); }
       } }, isOff ? t('reactivate_scout') : t('deactivate_scout'));
 
@@ -508,7 +509,7 @@
         try { await api('/api/scouts/' + data.id, 'DELETE'); current = null; data = det = null; await loadScouts(); drawDetail(); }
         catch (e) { fail(e); }
       } }, t('delete_scout'));
-      const offBanner = isOff ? el('p', { class: 'panel hint' }, t('inactive_note')) : '';
+      const offBanner = isOff ? el('div', { class: 'panel hint' }, el('p', {}, t('inactive_note')), det.deactivation_reason ? el('p', {}, el('b', { dir: 'auto' }, t('inactive_reason').replace('{reason}', det.deactivation_reason))) : '') : '';
 
       const ro = !editable(scouts.find((s) => s.id === data.id)); // another patrol's scout, seen by a mod: nothing to change
       if (ro) {
@@ -846,7 +847,7 @@
       };
       // grouped like the scout lists: each patrol under its own heading (the leaders' patrol first), scouts without one last
       const groups = m.kind === 'patrol' ? (list.length ? [[meetingPatrol(m) ? patrolName(meetingPatrol(m)) : '', list]] : []) : patrols.map((p) => [patrolName(p), list.filter((s) => s.patrol_id === p.id || (p.is_leadership && s.in_council))])
-        .concat([[tu('no_patrol'), list.filter((s) => !s.patrol_id && !s.in_council)]]).filter(([, g]) => g.length);
+        .concat([[tu('no_patrol'), list.filter((s) => !s.patrol_id && !s.in_council && !s.is_super)]]).filter(([, g]) => g.length);
       refreshCount();
       box.replaceChildren(
         el('div', { class: 'row' }, el('button', { class: 'btn small', type: 'button', onclick: () => openAttendance() }, t('att_back')), el('span', { class: 'grow' }), counter),

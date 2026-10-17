@@ -503,7 +503,7 @@ const hexColor = (v) => {
 const DETAIL_COLS = 'id, name, full_name, phone, join_date, address, birth_date, guardian_name, guardian_phone, medical_notes, notes';
 
 app.get('/api/leader/scouts/:id', requireLeader, wrap(async (req, res) => {
-  const { rows } = await pool.query(`SELECT ${DETAIL_COLS}, troop_id, patrol_id, (photo IS NOT NULL) AS has_photo, photo_hidden FROM scouts WHERE id = $1`, [intId(req.params.id)]);
+  const { rows } = await pool.query(`SELECT ${DETAIL_COLS}, troop_id, patrol_id, (photo IS NOT NULL) AS has_photo, photo_hidden, deactivation_reason, deactivated_at FROM scouts WHERE id = $1`, [intId(req.params.id)]);
   // admins and mods only get their own troop's scouts (a mod gets all of them, but can change only its patrol's: `editable`); the super admin and leaders (who work in every troop) get any
   if (!rows[0] || (!roams(req.leader) && rows[0].troop_id !== req.leader.troop_id)) return bad(res, 'not_found', 404);
   // tags are leader-only: they come with the private details
@@ -582,8 +582,10 @@ app.put('/api/scouts/:id/active', requireLeader, wrap(async (req, res) => {
   if (!sc) return bad(res, 'not_found', 404);
   const active = req.body?.active === true;
   if (!active && (await pool.query('SELECT 1 FROM leaders WHERE scout_id = $1', [id])).rows[0]) return bad(res, 'scout_is_leader', 409); // remove the account first
-  await pool.query('UPDATE scouts SET active = $1, deactivated_at = CASE WHEN $1 THEN NULL ELSE now() END WHERE id = $2', [active, id]);
-  audit(req.leader, active ? 'scout_reactivate' : 'scout_deactivate', { name: sc.name }, sc.troop_id);
+  const reason = active ? null : text(req.body?.reason, 300);
+  if (!active && !reason) return bad(res, 'reason_required', 400); // leaving the movement always has a reason
+  await pool.query('UPDATE scouts SET active = $1, deactivated_at = CASE WHEN $1 THEN NULL ELSE now() END, deactivation_reason = $3 WHERE id = $2', [active, id, reason]);
+  audit(req.leader, active ? 'scout_reactivate' : 'scout_deactivate', active ? { name: sc.name } : { name: sc.name, reason }, sc.troop_id);
   res.json({ ok: true });
 }));
 

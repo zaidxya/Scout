@@ -225,7 +225,8 @@ function renderScoutList(ul, scouts, selectedId, onSelect, extra, emptyKey = 'no
   // leader accounts (in_council) are in the leaders' patrol as well as their own patrol, so they are listed under both
   patrols.forEach((p) => group(patrolName(p), scouts.filter((s) => s.patrol_id === p.id || (p.is_leadership && s.in_council))));
   const ids = new Set(patrols.map((p) => p.id));
-  group(tu('no_patrol'), scouts.filter((s) => !ids.has(s.patrol_id)));
+  // accounts (in_council) already sit in the leaders' patrol, so they never count as "no patrol"
+  group(tu('no_patrol'), scouts.filter((s) => !ids.has(s.patrol_id) && !s.in_council && !s.is_super));
 }
 
 function renderDetailHead(scout, showRoles = true) {
@@ -254,6 +255,26 @@ function renderLog(scout, onUndo) {
 }
 
 // Styled confirmation popup. Usage: if (!(await confirmBox(message, buttonLabel))) return;
+// like confirmBox, but also asks for a required written reason; resolves to the reason text, or null when cancelled
+function reasonBox(message, okLabel, labelKey, hintKey) {
+  return new Promise((resolve) => {
+    const input = el('textarea', { rows: '3', maxlength: '300', required: true, placeholder: t(hintKey), 'aria-label': t(labelKey), dir: 'auto' });
+    const ok = el('button', { class: 'btn danger', type: 'button', disabled: true }, okLabel || t('delete'));
+    const no = el('button', { class: 'btn ghost', type: 'button' }, t('cancel'));
+    const dlg = el('dialog', { class: 'confirm' },
+      el('h3', {}, t('confirm_title')), el('p', {}, message),
+      el('label', {}, el('span', {}, t(labelKey)), input),
+      el('div', { class: 'actions' }, no, ok));
+    const done = (v) => { dlg.close(); dlg.remove(); resolve(v); };
+    input.addEventListener('input', () => { ok.disabled = !input.value.trim(); }); // a reason is required
+    ok.addEventListener('click', () => { if (input.value.trim()) done(input.value.trim()); });
+    no.addEventListener('click', () => done(null));
+    dlg.addEventListener('cancel', (e) => { e.preventDefault(); done(null); });
+    document.body.append(dlg);
+    dlg.showModal();
+    input.focus();
+  });
+}
 function confirmBox(message, okLabel) {
   return new Promise((resolve) => {
     const dlg = el('dialog', { class: 'confirm' },

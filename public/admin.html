@@ -254,6 +254,7 @@
         case 'xp_undo': case 'music_xp_undo': return `${verb} ${signed(m.xp)} ${t('xp')} (${act}) ${t('audit_from')} ${m.name}`;
         case 'activity_add': return `${verb} ${ar ? m.name_ar : m.name_en} (${signed(m.xp)} ${t('xp')})`;
         case 'activity_delete': return `${verb} ${ar ? m.name_ar : m.name_en}`;
+        case 'scout_deactivate': return `${verb} ${m.name}${m.reason ? ` (${m.reason})` : ''}`;
         case 'scout_patrol': return `${verb} ${m.name}${m.patrol ? ` (${m.patrol})` : ''}`;
         case 'scout_promote': return `${verb} ${m.name} ${t('audit_to')} ${m.to}`;
         case 'depot_reserve': case 'depot_unreserve': return `${verb} ${m.name} × ${fmt(m.quantity)}`; // build 34 entries: one item each

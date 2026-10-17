@@ -151,6 +151,8 @@ ALTER TABLE leaders ADD CONSTRAINT leaders_role_check CHECK (role IN ('super_adm
 -- scouts are never deleted: leaving the movement deactivates them (hidden from the public dashboard and the default lists, history kept)
 ALTER TABLE scouts ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT true;
 ALTER TABLE scouts ADD COLUMN IF NOT EXISTS deactivated_at TIMESTAMPTZ;
+-- why the scout was deactivated (asked when deactivating, cleared on reactivation)
+ALTER TABLE scouts ADD COLUMN IF NOT EXISTS deactivation_reason TEXT;
 
 -- the depot (مستودع): one shared inventory; leaders read it, only the super admin changes it
 CREATE TABLE IF NOT EXISTS depot_items (
