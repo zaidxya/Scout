@@ -360,3 +360,5 @@ CREATE TABLE IF NOT EXISTS music_depot_items (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- site-wide settings (key/value), e.g. the site font chosen in Administration
+CREATE TABLE IF NOT EXISTS site_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);

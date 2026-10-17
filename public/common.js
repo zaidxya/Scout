@@ -96,7 +96,29 @@ async function setLang(l) {
   showPage();
 }
 
+// light/dark toggle in the header, next to the language button (font.js applies and remembers the choice)
+const MODE_ICONS = {
+  sun: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
+  moon: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>',
+};
+function initMode() {
+  const lang = document.getElementById('langBtn');
+  if (!lang || document.getElementById('modeBtn')) return;
+  const b = document.createElement('button');
+  b.id = 'modeBtn'; b.type = 'button'; b.className = 'mode';
+  b.addEventListener('click', () => applyMode(currentMode() === 'dark' ? 'light' : 'dark', true));
+  lang.before(b);
+  const paint = () => {
+    const dark = currentMode() === 'dark', label = t(dark ? 'light_mode' : 'dark_mode');
+    b.innerHTML = dark ? MODE_ICONS.sun : MODE_ICONS.moon; // sun (switch to light) / moon (switch to dark): line icons, same size, no emoji
+    b.title = label; b.setAttribute('aria-label', label);
+  };
+  document.addEventListener('modechange', paint); document.addEventListener('langchange', paint);
+  paint();
+}
+
 function initLang() {
+  initMode();
   const saved = localStorage.getItem('lang');
   const l = saved === 'en' ? 'en' : 'ar'; // Arabic unless the visitor chose English before
   document.getElementById('langBtn').addEventListener('click', () => setLang(state.lang === 'ar' ? 'en' : 'ar'));
@@ -155,7 +177,7 @@ function el(tag, attrs = {}, ...kids) {
   return n;
 }
 
-const locale = () => (state.lang === 'ar' ? 'ar-EG' : 'en');
+const locale = () => (state.lang === 'ar' ? 'ar-u-nu-latn' : 'en'); // Arabic words and month names, but always 0-9 digits (never ٠-٩)
 const fmt = (n) => Number(n).toLocaleString(locale());
 // activity day arrives as plain YYYY-MM-DD; format it in UTC so it never shifts by timezone
 const fmtDay = (d) => new Date(d).toLocaleDateString(locale(), { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' });

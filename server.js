@@ -266,6 +266,20 @@ const ROLES_JSON = `COALESCE((SELECT json_agg(json_build_object('id', l.id, 'nam
     ORDER BY l.priority DESC, l.name_en)
   FROM scout_labels sl JOIN labels l ON l.id = sl.label_id AND l.kind = 'role' WHERE sl.scout_id = s.id), '[]'::json) AS roles`;
 
+// ---- site settings: the font for the whole site (public to read; the super admin changes it). Fonts load from Google Fonts in the browser, never from this server ----
+const SITE_FONT_KEYS = ['cairo','tajawal','almarai','ibm_plex','noto_kufi','noto_sans','noto_naskh','amiri','readex','el_messiri','changa','mada','system'];
+app.get('/api/settings', wrap(async (req, res) => {
+  const r = (await pool.query("SELECT value FROM site_settings WHERE key = 'font'")).rows[0];
+  res.set('Cache-Control', 'no-cache').json({ font: r && SITE_FONT_KEYS.includes(r.value) ? r.value : SITE_FONT_KEYS[0] });
+}));
+app.put('/api/settings/font', requireLeader, requireSuper, wrap(async (req, res) => {
+  const font = String(req.body?.font ?? '');
+  if (!SITE_FONT_KEYS.includes(font)) throw invalid();
+  await pool.query("INSERT INTO site_settings (key, value) VALUES ('font', $1) ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value", [font]);
+  audit(req.leader, 'site_font', { font });
+  res.json({ ok: true });
+}));
+
 // ---- troops (names are public so the dashboard can offer a troop picker) ----
 app.get('/api/troops', wrap(async (req, res) => {
   res.json(await troopList());

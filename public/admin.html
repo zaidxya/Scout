@@ -14,7 +14,7 @@
   <script>document.documentElement.classList.add('js')</script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <script src="/font.js"></script>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -22,7 +22,7 @@
     <div class="grow"><h1><a class="brand" href="/"><img src="/logo-mark.png" alt=""><span data-i18n="title"></span></a></h1><p data-i18n="tab_admin"></p></div>
     <nav>
       <details class="menu" data-page="admin"></details>
-      <button id="langBtn" type="button" class="lang" data-i18n="lang_toggle">العربية</button>
+      <button id="langBtn" type="button" class="lang" data-i18n="lang_toggle">EN</button>
     </nav>
   </header>
   <main>
@@ -42,6 +42,14 @@
       </div>
 
       <div id="tab-troops" class="hidden">
+        <div class="panel">
+          <h2 data-i18n="font_title"></h2>
+          <p class="hint" data-i18n="font_hint"></p>
+          <form id="fontForm">
+            <div class="row"><select id="fontSelect" name="font" aria-label="" style="max-width:22rem"></select><button class="btn small" type="submit" data-i18n="save"></button></div>
+            <p id="fontPreview" style="font-size:1.15rem;margin:.75rem 0 0" dir="auto"></p>
+          </form>
+        </div>
         <div class="panel">
           <h2 data-i18n="troops_title"></h2>
           <p class="hint" data-i18n="troops_hint"></p>
@@ -169,6 +177,21 @@
           editRow);
       }));
     }
+    // ---------- site font ----------
+    let siteFont = DEFAULT_FONT;
+    function drawFont() {
+      const sel = $('fontSelect'), cur = sel.value || siteFont;
+      sel.setAttribute('aria-label', t('font_title'));
+      sel.replaceChildren(...Object.keys(SITE_FONTS).map((k) => el('option', { value: k, ...(k === cur ? { selected: '' } : {}) }, SITE_FONTS[k][state.lang === 'ar' ? 'ar' : 'en'])));
+      $('fontPreview').textContent = t('font_sample');
+    }
+    $('fontSelect').addEventListener('change', () => applyFont($('fontSelect').value)); // preview only until saved
+    $('fontForm').addEventListener('submit', async (ev) => {
+      ev.preventDefault();
+      try { const f = $('fontSelect').value; await api('/api/settings/font', 'PUT', { font: f }); siteFont = f; applyFont(f, true); msg(t('saved'), true); }
+      catch (e) { fail(e); }
+    });
+    api('/api/settings').then((s) => { siteFont = SITE_FONTS[s.font] ? s.font : DEFAULT_FONT; drawFont(); }).catch(() => drawFont());
     $('troopForm').addEventListener('submit', async (ev) => {
       ev.preventDefault();
       const f = new FormData(ev.target);
@@ -254,6 +277,7 @@
         case 'xp_undo': case 'music_xp_undo': return `${verb} ${signed(m.xp)} ${t('xp')} (${act}) ${t('audit_from')} ${m.name}`;
         case 'activity_add': return `${verb} ${ar ? m.name_ar : m.name_en} (${signed(m.xp)} ${t('xp')})`;
         case 'activity_delete': return `${verb} ${ar ? m.name_ar : m.name_en}`;
+        case 'site_font': return `${verb}: ${m.font && SITE_FONTS[m.font] ? SITE_FONTS[m.font][ar ? 'ar' : 'en'] : ''}`;
         case 'scout_deactivate': return `${verb} ${m.name}${m.reason ? ` (${m.reason})` : ''}`;
         case 'scout_patrol': return `${verb} ${m.name}${m.patrol ? ` (${m.patrol})` : ''}`;
         case 'scout_promote': return `${verb} ${m.name} ${t('audit_to')} ${m.to}`;
@@ -308,7 +332,7 @@
     $('logTroop').addEventListener('change', () => loadLog(true));
     $('logMore').addEventListener('click', () => loadLog(false));
 
-    document.addEventListener('langchange', () => { if (!me) return; setUnitTheme('default'); paintUnits(); drawTroops(); drawAccounts(); drawLog(); });
+    document.addEventListener('langchange', () => { if (!me) return; setUnitTheme('default'); paintUnits(); drawTroops(); drawAccounts(); drawLog(); drawFont(); });
 
     (async () => {
       await initLang();

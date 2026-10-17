@@ -253,3 +253,7 @@ Every troop also has one pre-made patrol for its leaders: **قيادة الفر�
 
 - English wording to match the Arabic changes ("Scout list", "Leadership").
 - Visitor analytics for the public page.
+
+**Site font and digits**: the super admin picks the font for the whole site in **Administration > Troops** (Cairo by default; Tajawal, Almarai, IBM Plex Sans Arabic, Noto Kufi/Sans/Naskh Arabic, Amiri, Readex Pro, El Messiri, Changa, Mada, or the device's own font). Fonts are loaded by the browser from Google Fonts, only the chosen one, so the server does no extra work; the choice is stored in `site_settings` and remembered in each browser (`public/font.js`). Numbers always use 0-9, also in Arabic.
+
+**Dark mode** (a soft, low-contrast dark: grey-tinted surfaces and dimmed text): a moon/sun button next to the language button switches between light and dark. It follows the device setting until the visitor picks one, then remembers the choice in that browser (`data-mode=dark` on `<html>`, set by `public/font.js`). Each troop theme keeps its own hue in dark mode: the header and news ticker keep the theme's exact brand colours, and buttons/links use a lighter tint of the same colour (blocks at the end of `style.css`).

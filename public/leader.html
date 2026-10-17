@@ -14,7 +14,7 @@
   <script>document.documentElement.classList.add('js')</script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap" rel="stylesheet">
+  <script src="/font.js"></script>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -22,7 +22,7 @@
     <div class="grow"><h1><span class="brand"><img src="/logo-mark.png" alt=""><span data-i18n="title"></span><small id="brandSlogan" class="brand-slogan hidden"></small></span></h1><p data-i18n="leader_area"></p><p id="meName" dir="auto" style="font-weight:700;opacity:1;padding-inline-end:1rem;border-inline-end:1px solid rgba(var(--on-primary-rgb),.4)"></p></div>
     <nav>
       <details class="menu" data-page="leader"></details>
-      <button id="langBtn" type="button" class="lang" data-i18n="lang_toggle">العربية</button>
+      <button id="langBtn" type="button" class="lang" data-i18n="lang_toggle">EN</button>
     </nav>
   </header>
   <main>
@@ -233,7 +233,6 @@
         b.setAttribute('aria-selected', String(x === n));
         if (x === n) b.scrollIntoView({ block: 'nearest', inline: 'nearest' });
       });
-      if (n === 'addscout') $('addForm').elements.name.focus();
       if (n === 'activities') loadActs();
       if (n === 'patrols') loadPatrols();
       if (n === 'attendance') openAttendance();

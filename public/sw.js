@@ -3,7 +3,7 @@
 // Pages always come from the network (so an update shows at once); only when it fails is /offline.html shown.
 // Scripts, styles, language files and images are fetched from the network first and kept, so the site's look still loads when the connection drops.
 const CACHE = 'scout-v1';
-const SHELL = ['/offline.html', '/pwa-icon-192.png', '/logo-mark.png', '/style.css', '/common.js'];
+const SHELL = ['/offline.html', '/pwa-icon-192.png', '/logo-mark.png', '/style.css', '/common.js', '/font.js'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
